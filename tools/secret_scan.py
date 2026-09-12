@@ -2,8 +2,9 @@
 """Fail if this public snapshot still contains known private strings.
 
 Needles are one-way SHA-256 hashes of UTF-8 secret bytes. Matching uses
-printable-run extraction plus fixed-length sliding windows so the tree
-cannot recover the original values.
+token extraction plus fixed-length sliding windows. Hashes avoid storing
+plaintext values, but low-entropy inputs remain vulnerable to guessing.
+This checks only the known values; use a general scanner for new secrets.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# (utf-8 byte length, sha256 hex). Values are irreversible.
+# (UTF-8 byte length, SHA-256 digest). Never add plaintext values here.
 HASHES: list[tuple[int, str]] = [
     (13, "4b1555943fdfd70fd18d296c6526cf16bef1f2046168d4e1841d3887b724823e"),
     (9, "e94569dce44f93d536c62e15757367bfd763abf3f885c494e1438040ce799728"),

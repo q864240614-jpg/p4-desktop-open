@@ -16,3 +16,10 @@ main/todo_credentials.h
 main/codex_credentials.h
 .DS_Store
 Thumbs.db
+
+# Local service databases, including SQLite journals and backups
+*.sqlite3*
+*.sqlite
+*.db
+.env
+.env.local

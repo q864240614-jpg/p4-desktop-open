@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(ui_review C)
 get_filename_component(UI_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-file(GLOB_RECURSE LVGL "${UI_ROOT}/managed_components/lvgl__lvgl/src/*.c")
+set(LVGL_ROOT "${UI_ROOT}/managed_components/lvgl__lvgl" CACHE PATH "LVGL 8.3.11 source directory")
+file(GLOB_RECURSE LVGL "${LVGL_ROOT}/src/*.c")
 file(GLOB FONTS "${UI_ROOT}/components/portable_ui/lv_font_*.c")
 add_executable(smoke "${CMAKE_CURRENT_LIST_DIR}/smoke.c" ${LVGL} ${FONTS}
  "${UI_ROOT}/components/portable_ui/portable_icons.c"
@@ -9,7 +10,7 @@ add_executable(smoke "${CMAKE_CURRENT_LIST_DIR}/smoke.c" ${LVGL} ${FONTS}
  "${UI_ROOT}/components/portable_ui/portable_ui_json.c"
  "${IDF_PATH}/components/json/cJSON/cJSON.c")
 target_include_directories(smoke PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${UI_ROOT}/components/portable_ui"
- "${UI_ROOT}/managed_components/lvgl__lvgl" "${IDF_PATH}/components/json/cJSON")
+ "${LVGL_ROOT}" "${IDF_PATH}/components/json/cJSON")
 target_compile_definitions(smoke PRIVATE LV_CONF_SKIP=1 LV_KCONFIG_IGNORE=1 LV_COLOR_DEPTH=16
  LV_MEM_CUSTOM=1 LV_USE_FONT_COMPRESSED=1 LV_FONT_FMT_TXT_LARGE=1 LV_DISP_DEF_REFR_PERIOD=16 _CRT_SECURE_NO_WARNINGS)
 target_compile_options(smoke PRIVATE /utf-8 /std:c11 /UNDEBUG)

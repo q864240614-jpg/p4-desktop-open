@@ -4,19 +4,25 @@
 
 Landscape 800×480 LVGL dashboard for an ESP32-P4 board: Bambu Lab H2D / A1 mini status, a standby clock, a Codex quota page, and a Todo list. Optional LAN helpers live next to the firmware: a Python Todo/Feishu service and a printer-camera JPEG relay.
 
-This folder is a **reusable snapshot**, not a private working copy. It is meant for people (and their agents) who want the same product on this board, or who want to lift pieces onto a different board. It is not a drop-in firmware for every ESP32 module.
+This reference implementation targets the hardware below. Its LVGL interface and LAN services can also be reused on other boards after adapting the display, touch, and networking integration.
 
-## Hardware this snapshot targets
+## Interface preview
+
+![Main interface screens](assets/preview/overview.png)
+
+Actual LVGL host renders at 800×480 using synthetic printer, quota, and task data. These are interface illustrations, not device photographs. Individual screens and reproduction steps: [preview gallery](assets/preview/README.md).
+
+## Supported hardware
 
 - **SoC:** ESP32-P4, 16 MB flash, PSRAM (200 MHz). The UI caches clock digits in PSRAM; plan on 16 MB PSRAM.
 - **Wi-Fi:** onboard ESP32-C6 through ESP-Hosted over SDIO slot 1. Default pins in `sdkconfig.defaults`: CLK 18, CMD 19, D0 14, D1 15, D2 16, D3 17, C6 reset 54.
 - **Panel:** ST7701 MIPI-DSI, native 480×800, RGB565, two DSI lanes. LVGL layout is 800×480; `p4_display.c` rotates with PPA. The BSP option `CONFIG_BSP_LCD_TYPE_1024_600` is the **name of the 480×800 ST7701 branch** in this BSP — do not change it to a 1024×600 panel unless you rewrite the display path.
 - **Touch:** GT911, I2C SDA GPIO7, SCL GPIO8. Backlight GPIO23, LCD reset GPIO5.
-- **Toolchain:** ESP-IDF **5.4.x** (5.4 ≤ version < 6.0) and **LVGL 8.3.11**. Do not use IDF 6 or LVGL 9.
+- **Toolchain:** ESP-IDF **5.4.x** (reference version: 5.4.2; the manifest permits `>=5.4,<6.0`) and **LVGL 8.3.11**. Do not use IDF 6 or LVGL 9.
 
-If your board matches this, you mainly fill local credentials and flash. If it does not, keep `components/portable_ui`, `todo_service`, and `video_relay`, and replace the display / touch / Wi-Fi glue. See [AGENTS.md](AGENTS.md).
+If your board matches this, you mainly fill local credentials and flash. If it does not, keep `components/portable_ui`, `todo_service`, and `video_relay`, and adapt the display, touch, and Wi-Fi interfaces. See [AGENTS.md](AGENTS.md).
 
-## What you can reuse as-is
+## Project structure
 
 | Piece | Role |
 | --- | --- |
@@ -26,11 +32,11 @@ If your board matches this, you mainly fill local credentials and flash. If it d
 | `main/bambu_config.c` | NVS printer settings + local config web page |
 | `assets/` | fonts, icons, design previews (`assets/preview/`) |
 
-Board-specific glue is `main/p4_display.c`, `main/main.c` BSP bring-up, `vendor/` BSP/LCD, C6 SDIO pins, and most of `sdkconfig.defaults`.
+Board-specific integration includes `main/p4_display.c`, `main/main.c` BSP bring-up, `vendor/` BSP/LCD, C6 SDIO pins, and most of `sdkconfig.defaults`.
 
 ## Local config (required before a real flash)
 
-Live secrets are **not** in this tree. Copy the examples and edit them on your machine:
+Copy the configuration examples and replace their placeholders locally:
 
 ```text
 copy main\wifi_credentials.example.h   main\wifi_credentials.h
@@ -47,7 +53,7 @@ On Unix use `cp`. Then:
 4. Set `VIDEO_RELAY_IP` in `main/video_relay.h` to the host that will run `video_relay/` (placeholder is `192.168.1.10`).
 5. Fill `todo_service/deploy.env` with a web password, device token, session secret, and optional Feishu app id/secret/redirect URI.
 
-Those live files are gitignored. Do not commit them.
+The three live credential headers and `todo_service/deploy.env` are gitignored. `main/video_relay.h` is tracked: keep its published address as a placeholder. Wi-Fi and service credentials are compiled into locally built firmware, so do not publish configured binaries.
 
 Printer LAN IP / serial / access code are **not** compiled in. After Wi-Fi is up, the screen shows the board IP and a 6-digit PIN. Open `http://<board-ip>/` as `admin` / that PIN and save H2D and A1 mini settings. The PIN changes every reboot. MQTT is LAN port 8883, username `bblp`. This snapshot does not send pause/cancel/start commands.
 
@@ -57,6 +63,9 @@ Install [ESP-IDF 5.4.x](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/es
 
 ```sh
 # first-time: copy the example credential headers (see above)
+idf.py reconfigure
+# Apply once, after dependencies have been fetched:
+patch -p1 -d managed_components/espressif__esp_hosted < patches/esp-hosted-c6-start.patch
 idf.py build
 idf.py -p PORT flash
 ```
@@ -64,16 +73,13 @@ idf.py -p PORT flash
 Windows helper (still needs a real IDF environment on PATH):
 
 ```powershell
+idf.py -B build-win reconfigure
+# Apply patches/esp-hosted-c6-start.patch with Git patch before building.
 .\tools\build.ps1
 .\tools\flash.ps1 -Port COMx
 ```
 
-First configure downloads LVGL 8.3.11, `esp_lvgl_port` 2.6.0, ESP-Hosted, and related components into `managed_components/` (gitignored). After that download, apply the C6 STA_START debounce:
-
-```sh
-# from this folder, after managed_components/espressif__esp_hosted exists
-patch -p1 -d managed_components/espressif__esp_hosted < patches/esp-hosted-c6-start.patch
-```
+First configure downloads LVGL 8.3.11, `esp_lvgl_port` 2.6.0, ESP-Hosted, and related components into `managed_components/` (gitignored). Apply the C6 repeated `STA_START` patch before building; reapply it if the managed component is freshly downloaded.
 
 On Windows, use Git `patch` or apply the same hunk by hand. The BSP is already vendored at `vendor/espressif__esp32_p4_function_ev_board` (ST7701 driver beside it); `main/idf_component.yml` points there, so you do not need a sibling `common_components` directory.
 
@@ -84,12 +90,17 @@ Flash does **not** erase NVS, so printer settings survive a rebuild. Do not writ
 **Todo** (`todo_service/`): Python 3 standard library + SQLite. Copy `deploy.env.example` to `deploy.env`, then:
 
 ```sh
+set -a
+. ./todo_service/deploy.env
+set +a
 python todo_service/server.py
 ```
 
-systemd user unit: `todo_service/p4-todo.service` (uses `%h/p4-todo`). Feishu is optional; create your own open-platform app and put `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REDIRECT_URI` in `deploy.env`. Details: `todo_service/README.md`.
+The shell example above uses Bash; `server.py` reads environment variables and does not load `deploy.env` itself. On Windows, set the same environment variables in PowerShell.
 
-**Video relay** (`video_relay/`): transcodes H2D RTSPS (and optionally A1 JPEG) to 800×480 JPEG for the board. H2D liveview and MQTT on the printer at the same time will drop the LAN MQTT session; this board therefore uses the relay for H2D and direct JPEG for A1 mini. Details: `video_relay/README.md` and `video_relay/P4_DEV.md`.
+systemd user unit: `todo_service/p4-todo.service` (uses `%h/p4-todo`). Feishu is optional; create your own open-platform app and put `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REDIRECT_URI` in `deploy.env`. Details: [Todo service](todo_service/README.md).
+
+**Video relay** (`video_relay/`): transcodes H2D RTSPS (and optionally A1 JPEG) to 800×480 JPEG for the board. The reference setup uses a relay for H2D video and supports direct JPEG for A1 mini. MQTT/liveview coexistence depends on printer firmware and LAN mode; verify both on your printer. Details: [video relay](video_relay/README.md) and [protocol](video_relay/P4_DEV.md).
 
 ## Tests you can run without a board
 

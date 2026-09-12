@@ -8,8 +8,13 @@ Python 3 standard library + SQLite. Serves a browser UI and the ESP32 Todo page.
 cp deploy.env.example deploy.env
 # edit TODO_PASSWORD, TODO_DEVICE_TOKEN, TODO_SESSION_SECRET
 # optional: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_REDIRECT_URI, TZ
+set -a
+. ./deploy.env
+set +a
 python server.py
 ```
+
+The commands above use Bash. The server reads process environment variables; it does not load `deploy.env` automatically. For PowerShell, set the corresponding `$env:` variables before starting Python.
 
 `TODO_DEVICE_TOKEN` must match the bearer in firmware `main/todo_credentials.h`. `FEISHU_REDIRECT_URI` must be an exact URL you also add in the Feishu open-platform app (security settings), for example `http://192.168.1.10:2333/api/feishu/callback`.
 

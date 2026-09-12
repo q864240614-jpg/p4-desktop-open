@@ -523,18 +523,20 @@ int main(void)
     assert(!strcmp(lv_label_get_text(printer_pages[printer_slot].metrics[0]),"AWAIT AN\nOPPORTUNITY"));
     {
         PrinterTextCache *finish=&printer_pages[printer_slot].text_cache[3];
-        const lv_font_t *font=&lv_font_inter_28;
+        const lv_font_t *font=&lv_font_inter_24;
         int uy=font->line_height+font->line_height-font->base_line-font->underline_position;
         const uint8_t *pix=finish->image.data;int w=finish->image.header.w;
         int ink=0;for(int x=0;x<w;x++)if(pix[uy*w+x]>200)ink++;
         assert(ink>40);
     }
-    assert(lv_obj_get_style_text_font(printer_pages[printer_slot].metrics[0],0)==&lv_font_inter_28);
+    assert(lv_obj_get_style_text_font(printer_pages[printer_slot].metrics[0],0)==&lv_font_inter_24);
+    assert(lv_obj_get_style_text_letter_space(printer_pages[printer_slot].metrics[0],0)==0);
     assert(lv_obj_get_style_text_color(printer_pages[printer_slot].metrics[0],0).full==lv_color_hex(COLOR_MUTED).full);
     assert(lv_obj_get_x(printer_pages[printer_slot].percent)==20);
     strcpy(printer.state,"RUNNING");printer.remaining=650;PortableUI_SetPrinter(&printer);advance(50);
     assert(!strcmp(lv_label_get_text(printer_pages[printer_slot].metrics[0]),"10H 50M"));
     assert(lv_obj_get_style_text_font(printer_pages[printer_slot].metrics[0],0)==&lv_font_inter_28);
+    assert(lv_obj_get_style_text_letter_space(printer_pages[printer_slot].metrics[0],0)==3);
     printer.remaining=1263;PortableUI_SetPrinter(&printer);advance(50);
     assert(!strcmp(lv_label_get_text(printer_pages[printer_slot].metrics[0]),"21H 03M"));
     printer.remaining=6000;PortableUI_SetPrinter(&printer);advance(50);
@@ -733,7 +735,8 @@ int main(void)
     PortableUI_SetCodex(&quota);assert(codex_connected);
     assert(!strcmp(lv_label_get_text(codex_state_label),"LIVE"));
     assert(!strcmp(lv_label_get_text(codex_plan_label),"PLUS"));
-    lv_event_send(nav_buttons[2],LV_EVENT_CLICKED,NULL);advance(50);check_labels(ui_root);snapshot("codex-quota");
+    lv_event_send(nav_buttons[2],LV_EVENT_CLICKED,NULL);advance(12000);
+    assert(!event_playing);check_labels(ui_root);snapshot("codex-quota");
     assert(!PortableUI_ParseCodexJSON(NULL,&quota) && quota.remaining[0]==17 && !quota.online);
     PortableUI_SetCodex(&quota);advance(50);snapshot("codex-quota-offline");
     assert(!codex_connected && !strcmp(lv_label_get_text(codex_state_label),"STALE"));

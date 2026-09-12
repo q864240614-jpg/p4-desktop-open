@@ -1319,6 +1319,8 @@ static void update_printer(PrinterPage *p,const BambuState *s)
     printer_text_color(p->percent,s->online?COLOR_WHITE:COLOR_MUTED);
     if(first || old->progress!=s->progress || old->online!=s->online || printer_color(old)!=printer_color(s))lv_obj_invalidate(p->bar);
     bool finished=!strcmp(s->state,"FINISH");
+    lv_obj_set_style_text_font(p->metrics[0],finished?&lv_font_inter_24:&lv_font_inter_28,0);
+    lv_obj_set_style_text_letter_space(p->metrics[0],finished?0:3,0);
     if(finished)printer_text(p->metrics[0],"AWAIT AN\nOPPORTUNITY");
     else if(s->remaining>=0) printer_text_fmt(p->metrics[0],"%dH %02dM",s->remaining/60,s->remaining%60);
     else printer_text(p->metrics[0],"--H --M");
