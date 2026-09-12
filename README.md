@@ -102,6 +102,15 @@ systemd user unit: `todo_service/p4-todo.service` (uses `%h/p4-todo`). Feishu is
 
 **Video relay** (`video_relay/`): transcodes H2D RTSPS (and optionally A1 JPEG) to 800×480 JPEG for the board. The reference setup uses a relay for H2D video and supports direct JPEG for A1 mini. MQTT/liveview coexistence depends on printer firmware and LAN mode; verify both on your printer. Details: [video relay](video_relay/README.md) and [protocol](video_relay/P4_DEV.md).
 
+## H2D video: relay and direct connection
+
+H2D video has a relay path and a retained direct-decoding implementation:
+
+- **Relay (the current firmware path):** a LAN host receives RTSPS/H.264, decodes it to 800×480 JPEG, and sends frames to the ESP32-P4. Run `video_relay/` and configure its address in `main/video_relay.h`.
+- **Direct (requires firmware integration):** `main/bambu_video_rtsp.inc` and `components/openh264/` retain the implementation for receiving and decoding RTSPS/H.264 on the ESP32-P4. It decodes IDR keyframes only, not continuous P/B frames; refresh rate depends on keyframe intervals and on-board decoding performance.
+
+The H2D branch in `main/bambu_video.c` currently calls `play_relay()` unconditionally. There is no web or screen mode selector, and no automatic direct fallback. Using the direct implementation requires code integration, a rebuild, and validation; changing the relay address alone does not enable it. Both paths handle live streams, not MP4 file playback. A1 mini direct video uses a JPEG image stream.
+
 ## Tests you can run without a board
 
 ```sh

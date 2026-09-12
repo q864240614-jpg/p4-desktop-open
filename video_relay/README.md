@@ -6,10 +6,13 @@ Protocol notes: [Doridian/OpenBambuAPI video.md](https://github.com/Doridian/Ope
 
 ## Why a relay
 
-H2D High Profile 1680×1080 software decode on the P4 fights the UI. Opening H2D liveview **and** LAN MQTT at once also drops the printer’s MQTT session. This snapshot therefore:
+Decoding H2D H.264 on a LAN host reduces the ESP32-P4's software-decoding load. The repository contains both a relay path and a retained direct RTSPS/H.264 implementation:
 
-- **H2D:** board talks only to this relay.
-- **A1 mini:** board may still connect directly (hardware JPEG).
+- **H2D relay:** the current firmware routes H2D video through this service and receives JPEG frames.
+- **H2D direct:** `main/bambu_video_rtsp.inc` and `components/openh264/` retain on-board IDR-keyframe decoding. The current H2D branch in `main/bambu_video.c` calls `play_relay()` unconditionally, so direct mode requires firmware code integration, rebuilding, and validation. It is not a runtime option or automatic fallback. Only IDR keyframes are decoded; P/B frames are not continuously decoded.
+- **A1 mini:** the board can connect directly to its JPEG stream using hardware JPEG decoding.
+
+These are live-stream paths, not MP4 file playback. MQTT/liveview coexistence depends on printer firmware and LAN mode and should be verified on the target printer.
 
 Turn on LAN Only Liveview / Local RTSP on the printer.
 

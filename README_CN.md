@@ -99,6 +99,15 @@ systemd 用户单元：`todo_service/p4-todo.service`（工作目录 `%h/p4-todo
 
 **视频中转**（`video_relay/`）：把 H2D 的 RTSPS（以及可选的 A1 JPEG）转成 800×480 JPEG。参考配置中，H2D 视频使用中转，A1 mini 支持直连 JPEG。MQTT 与直播能否同时稳定运行取决于打印机固件和局域网模式，需要在实际设备上验证。详见[视频中转说明](video_relay/README.md)和[协议文档](video_relay/P4_DEV.md)。
 
+## H2D 视频：中转与直连
+
+H2D 视频提供中转方案，并保留直连解码实现：
+
+- **中转（当前固件默认路径）**：主机接收打印机 RTSPS/H.264 视频，解码并转为 800×480 JPEG，再发送给 ESP32-P4 显示。需运行 `video_relay/`，并设置 `main/video_relay.h` 中的主机地址。
+- **直连（需修改固件接入）**：`main/bambu_video_rtsp.inc` 和 `components/openh264/` 保留了 ESP32-P4 直接接收 RTSPS/H.264 并解码的实现，仅处理 IDR 关键帧，不连续解码 P/B 帧；刷新速度取决于关键帧间隔和板端解码性能。
+
+当前 `main/bambu_video.c` 的 H2D 分支固定调用 `play_relay()`，网页和屏幕没有直连/中转切换项，也不会在中转不可用时自动直连。使用直连需要开发者接入保留的实现、重新编译并验证；不能仅修改中转地址完成切换。两条路径处理的是实时视频流，不是 MP4 文件播放。A1 mini 的直连使用 JPEG 图片流。
+
 ## 主机测试
 
 ```sh
