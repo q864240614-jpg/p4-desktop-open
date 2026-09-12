@@ -42,9 +42,20 @@ static int particle_cover(int x,int y)
     int edge=LV_MIN(LV_MIN(x,PARTICLE_WIDTH-1-x),LV_MIN(y,PARTICLE_HEIGHT-1-y));
     return edge>=fade?256:(edge+1)*256/(fade+1);
 }
+static int particle_surface_fog(const PrinterPage *p)
+{
+    PrinterEffect effect=printer_effect(&p->view);
+    int blend=stage_ease(p->motion_ms-p->stage_changed,1200);
+    if(effect==FX_WATER)return blend;
+    if(p->previous_effect==FX_WATER)return 256-blend;
+    return 0;
+}
 static void particle_soften(PrinterPage *p)
 {
     uint8_t *pixels=(uint8_t *)p->water.data,*blur=p->particle_blur;
+    int surface=particle_surface_fog(p);
+    int water_y=PARTICLE_HEIGHT-8-LV_MAX(0,p->view.progress)*(PARTICLE_HEIGHT-24)/100;
+    const int band=32;
     /* Separable radius-2 box blur, mixed into the field underneath information. */
     for(int y=0;y<PARTICLE_HEIGHT;y++){
         int sum=0;
@@ -61,11 +72,13 @@ static void particle_soften(PrinterPage *p)
         for(int y=0;y<PARTICLE_HEIGHT;y++){
             if(y+2<PARTICLE_HEIGHT)sum+=blur[(y+2)*PARTICLE_WIDTH+x];
             if(y>2)sum-=blur[(y-3)*PARTICLE_WIDTH+x];
-            int idx=y*PARTICLE_WIDTH+x,fog=p->fog_weights[idx];
+            int local=surface*LV_MAX(0,band-abs(y-water_y))/band;
+            int crush=96+local*160/256,dim=3+local*2/256;
+            int idx=y*PARTICLE_WIDTH+x,fog=p->fog_weights[idx]*crush/256;
             int soft=(pixels[idx]*96+(sum/5)*160)/256;
             soft=soft*210/256;
             int alpha=(pixels[idx]*(255-fog)+soft*fog)/255;
-            alpha=alpha*(255-fog*5/8)/255;
+            alpha=alpha*(255-fog*dim/8)/255;
             pixels[idx]=alpha*particle_cover(x,y)/256;
         }
     }

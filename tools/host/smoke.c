@@ -482,7 +482,15 @@ int main(void)
     assert(water_page->fog_weights[100*PARTICLE_WIDTH+48]>80);
     memset(alpha,90,water_page->water.data_size);
     particle_soften(water_page);
-    assert(alpha[100*PARTICLE_WIDTH+48]<alpha[78*PARTICLE_WIDTH+238]*2/3);
+    assert(alpha[100*PARTICLE_WIDTH+48]<alpha[78*PARTICLE_WIDTH+238]);
+    assert(alpha[100*PARTICLE_WIDTH+48]>alpha[78*PARTICLE_WIDTH+238]/2);
+    water_page->view.stage=-1;strcpy(water_page->view.state,"RUNNING");water_page->view.progress=45;
+    water_page->previous_effect=FX_STILL;water_page->stage_changed=0;water_page->motion_ms=2000;
+    memset(alpha,90,water_page->water.data_size);
+    particle_soften(water_page);
+    assert(alpha[176*PARTICLE_WIDTH+48]<alpha[78*PARTICLE_WIDTH+238]*2/3);
+    assert(alpha[236*PARTICLE_WIDTH+44]>alpha[176*PARTICLE_WIDTH+48]);
+    water_page->view.progress=64;
     memset(water_page->fog_weights,255,PARTICLE_WIDTH*PARTICLE_HEIGHT);
     memset(alpha,0,water_page->water.data_size);alpha[120*PARTICLE_WIDTH+120]=255;
     particle_soften(water_page);
