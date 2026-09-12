@@ -158,17 +158,17 @@ class OpenPackage(unittest.TestCase):
         self.assertIn("../vendor/espressif__esp32_p4_function_ev_board", yml)
         self.assertNotIn("common_components", yml)
 
-    def test_human_doc_covers_hardware_build_and_local_config(self):
+    def test_human_doc_covers_hardware_agent_workflow_and_local_config(self):
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertGreater(len(text.strip()), 400)
         for needle in (
             "ST7701",
             "GT911",
-            "idf.py",
+            "Agent-assisted development",
             "wifi_credentials.example.h",
             "todo_credentials.example.h",
             "deploy.env.example",
-            "ESP-IDF 5.4",
+            "ESP-IDF **5.4.x**",
         ):
             self.assertIn(needle, text)
 

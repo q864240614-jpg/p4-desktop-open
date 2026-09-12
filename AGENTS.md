@@ -2,6 +2,10 @@
 
 This repository targets an ESP32-P4 board with an ST7701 display, GT911 touch controller, and ESP32-C6 radio. Preserve the module boundaries below when modifying this board configuration or porting it to other hardware.
 
+## Intended workflow
+
+Users work with this repository through a coding Agent. Read both READMEs, collect the target hardware specifications and requested features, and assess compatibility before implementation. Own the local adaptation and validation work; report hardware verification limits clearly. User-facing documentation must not present manual compilation/flashing instructions or imply that matching hardware makes this a ready-to-flash product.
+
 ## Coding conventions
 
 - Trust defined types, interfaces, preconditions, and internal invariants. Implement the required normal behavior and specified failure paths.
@@ -40,17 +44,9 @@ This repository targets an ESP32-P4 board with an ST7701 display, GT911 touch co
 
 Public C API for the UI is `components/portable_ui/portable_ui.h`. Create under an LVGL lock, then pump `PortableUI_Process()` next to `lv_timer_handler()` (this firmware uses `esp_lvgl_port`’s task and a 25 ms timer in `main.c`).
 
-## Build for the reference board
+## Reference-board integration constraints
 
-If the hardware matches (P4 + this ST7701 + GT911 + C6 SDIO pins above):
-
-1. Copy example headers to `wifi_credentials.h`, `todo_credentials.h`, `codex_credentials.h` and edit `video_relay.h`.
-2. Export ESP-IDF 5.4 and run `idf.py reconfigure` from the repository root to fetch dependencies.
-3. Apply `patches/esp-hosted-c6-start.patch` inside `managed_components/espressif__esp_hosted`, then run `idf.py build`. The manifest resolves the BSP to the repository’s `vendor/` directory.
-4. Flash without erasing NVS unless you want to drop printer settings.
-5. Do not reintroduce secrets into git; `.gitignore` already lists the live files.
-
-Keep BSP dependencies relative to this repository; builds must not require an adjacent private project.
+Keep BSP dependencies relative to this repository; they must resolve to `vendor/` without an adjacent private project. The ESP-Hosted component needs `patches/esp-hosted-c6-start.patch` after dependency retrieval. Preserve printer settings in NVS during device work unless the user explicitly requests clearing them. Keep local credentials out of Git.
 
 ## Different board
 
