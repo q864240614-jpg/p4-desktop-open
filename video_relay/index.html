@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P4 打印机视频中转</title>
+<style>
+body { margin: 0; background: #111; color: #eee; font: 16px/1.4 sans-serif; }
+main { max-width: 800px; margin: 24px auto; padding: 0 16px; }
+label { display: block; margin: 8px 0 4px; }
+input, select, button { font: inherit; padding: 6px 8px; }
+input { width: 240px; }
+button { background: #00AE42; color: #111; border: 0; cursor: pointer; }
+img { max-width: 100%; background: #000; margin-top: 16px; }
+p { color: #aaa; }
+</style>
+</head>
+<body>
+<main>
+<h1>P4 视频中转（不落盘）</h1>
+<p>凭据只存在本次浏览器内存和当前拉流连接里。关闭页面即停止向打印机取流。不要把访问码写入书签或截图。</p>
+<label>打印机 IP</label>
+<input id="ip" autocomplete="off">
+<label>LAN 访问码</label>
+<input id="code" type="password" autocomplete="off">
+<label>机型</label>
+<select id="model"><option>H2D</option><option>A1MINI</option></select>
+<p><button id="start">开始预览</button> <button id="stop">停止</button></p>
+<img id="view" width="800" height="480" alt="预览">
+</main>
+<script>
+let session = null;
+async function stop() {
+  const id = session;
+  session = null;
+  document.getElementById("view").removeAttribute("src");
+  if (id) await fetch("/v1/session/" + id, {method: "DELETE"}).catch(() => {});
+}
+document.getElementById("start").onclick = async () => {
+  await stop();
+  const res = await fetch("/v1/session", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      ip: document.getElementById("ip").value.trim(),
+      access_code: document.getElementById("code").value,
+      model: document.getElementById("model").value,
+      width: 800, height: 480, fps: 8
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || "failed"); return; }
+  session = data.session;
+  document.getElementById("view").src = data.stream;
+};
+document.getElementById("stop").onclick = stop;
+window.addEventListener("pagehide", stop);
+</script>
+</body>
+</html>

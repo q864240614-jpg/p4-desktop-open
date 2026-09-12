@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P4 · STAGE 抽象示意</title>
+<style>
+:root{color-scheme:dark;--bg:#030303;--surface:#121315;--muted:#949493;--white:#f5f5f2;--bambu:#00ae42}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font:14px/1.45 ui-sans-serif,system-ui}
+header{padding:28px 32px 8px;position:sticky;top:0;background:linear-gradient(#030303 78%,transparent);z-index:2}
+.brand{letter-spacing:.16em;color:var(--bambu);font-size:12px}h1{font-weight:550;font-size:28px;margin:8px 0 6px}
+p{color:var(--muted);margin:0 0 12px;max-width:900px}
+nav{display:flex;flex-wrap:wrap;gap:8px;padding:0 32px 16px}
+nav button{border:0;border-radius:10px;padding:8px 12px;background:#17221a;color:#c5d4c8;cursor:pointer;font:inherit}
+nav button.active{background:#00ae42;color:#031109}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:22px;padding:8px 32px 48px}
+.card{width:272px;height:316px;margin:0 auto;background:var(--surface);border-radius:16px;position:relative;overflow:hidden;box-shadow:0 0 0 1px #1b221d}
+.card.pause{box-shadow:0 0 0 1px #f2b94255}
+.card.error{box-shadow:0 0 0 1px #ef424855}
+.marquee{position:absolute;inset:0;pointer-events:none;border-radius:16px}
+.card canvas.fill{position:absolute;left:8px;top:68px;width:256px;height:240px;image-rendering:pixelated}
+.icon{position:absolute;left:20px;top:22px}
+.label{position:absolute;left:54px;top:20px;width:198px;font:700 13px/28px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.percent{position:absolute;left:38px;top:86px;font:700 72px/1 "Segoe UI",ui-sans-serif,system-ui;color:#f5f5f2;pointer-events:none;text-shadow:0 0 18px #000c}
+.unit{position:absolute;left:220px;top:118px;color:var(--muted);font:600 22px ui-sans-serif}
+.meta{position:absolute;left:16px;bottom:14px;right:16px;color:#7d8c84;font:11px/1.35 ui-sans-serif}
+</style>
+<header>
+  <div class="brand">P4 DESK · ABSTRACT</div>
+  <h1>状态窗口：场，而不是物</h1>
+  <p>示意，不是固件。只用点阵的涨、升、扫、流、扩、收、抖、沉。过程阶段空槽。暂停与失败冻场，四边跑马灯仍是房间级告警。</p>
+</header>
+<nav id="filters"></nav>
+<main id="grid"></main>
+<script>
+const W=128,H=120;
+const ICONS={
+  run:[0x010,0x038,0x07C,0x0FE,0x1FF,0x0FE,0x07C,0x038,0x010],
+  pause:[0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6],
+  warning:[0x010,0x038,0x028,0x06C,0x054,0x0C6,0x082,0x110,0x1FF],
+  done:[0,0x100,0x180,0x0C1,0x063,0x036,0x01C,0x008,0],
+  offline:[0x101,0x082,0x044,0x028,0x010,0x028,0x044,0x082,0x101],
+  heat:[0x044,0x088,0x044,0x022,0x044,0,0x101,0x101,0x1FF],
+  level:[0x010,0x038,0x07C,0x010,0,0x101,0x111,0x101,0x1FF],
+  feed:[0x07C,0x082,0x092,0x082,0x07C,0x010,0x054,0x038,0x010],
+  scan:[0x1C7,0x101,0x101,0,0x1FF,0,0x101,0x101,0x1C7],
+  home:[0x010,0x038,0x07C,0x1FF,0x010,0x010,0x010,0x010,0x010],
+  clean:[0x1FF,0x101,0x1F1,0x011,0x011,0x010,0x010,0x038,0x07C],
+  cool:[0x1FF,0x101,0x101,0x044,0x044,0x022,0x022,0x011,0x011],
+  prep:[0x010,0x038,0x054,0x092,0x111,0x092,0x054,0x038,0x010]
+};
+function rgb(c){return [(c>>16)&255,(c>>8)&255,c&255]}
+function clamp(v,a,b){return v<a?a:v>b?b:v}
+function cell(x,y){return ((x+(y/5|0)%2*2)%5<2)&&(y%5<2)?1:.12}
+function add(b,i,v){v*=cell(i%W,i/W|0);b[i]=b[i]+v>255?255:b[i]+v}
+function at(b,x,y,v){if(x<0||y<0||x>=W||y>=H)return;add(b,y*W+(x|0),v)}
+function band(b,x0,x1,y,v){for(let x=x0;x<=x1;x++)at(b,x,y,v)}
+function vband(b,x,y0,y1,v){for(let y=y0;y<=y1;y++)at(b,x,y,v)}
+function ring(b,cx,cy,r,v,w){for(let y=cy-r-w|0;y<=cy+r+w;y++)for(let x=cx-r-w|0;x<=cx+r+w;x++){const d=Math.hypot(x-cx,y-cy);if(Math.abs(d-r)<w)at(b,x,y,v*(1-Math.abs(d-r)/w))}}
+
+const KINDS={
+  print(b,t,p){
+    const surf=H-10-(p/100)*(H-24)+Math.sin(t/1400)*1.2;
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+      const d=y-surf;if(d<0)continue;
+      b[y*W+x]=clamp(16+Math.min(36,d*1.8)+Math.sin(x*.2+t/800)*3,0,62)*cell(x,y);
+    }
+    for(let n=0;n<2;n++){
+      const per=n?2600:1900,u=(t+n*900)%per,x=24+(Math.sin((t/per+n)*1.7)*.5+.5)*(W-48);
+      if(u<700){
+        const y=8+(u/700)*(surf-8);
+        at(b,x,y,140*(u<180?u/180:1));
+      }else if(u<1500){
+        const age=u-700,R=3+age/40;
+        ring(b,x,surf,R,90*(1-age/800),2.2);
+      }
+    }
+  },
+  rise(b,t,spread){
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+      const g=Math.sin((y*.14)-(t/spread)+Math.sin(x*.11)*1.4);
+      const fall=1-y/H;
+      at(b,x,y,Math.max(0,g)*28*fall);
+    }
+  },
+  fog(b,t){
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+      const n=Math.sin(x*.05+t/1800)+Math.sin(y*.07-t/1600)+Math.sin((x+y)*.03+t/2200);
+      at(b,x,y,(n+2.2)*7);
+    }
+  },
+  plane(b,t,y0){
+    const tilt=Math.sin(t/1600)*6,xHold=((t/18)%(W+40))-20;
+    for(let x=8;x<W-8;x+=16)vband(b,x,y0-14,y0+14,16);
+    for(let x=6;x<W-6;x++){
+      const y=y0+(x-W/2)*tilt/40;
+      at(b,x,y,x>xHold-10&&x<xHold+6?150:36);
+    }
+  },
+  drift(b,t,axis,dir){
+    const period=(axis==="y"?H:W)+16;
+    for(let i=0;i<40;i++){
+      const s=(((t/14)*dir+i*9)%period+period)%period-8;
+      if(axis==="y")at(b,W/2+Math.sin(i+t/2000)*18,s,i%5===0?150:70);
+      else at(b,s,H/2+Math.sin(i+t/1800)*16,i%5===0?150:70);
+    }
+  },
+  oppose(b,t){
+    KINDS.drift(b,t,"y",1);
+    for(let i=0;i<40;i++){
+      const y=H+8-(((t/16)+i*9)%(H+16)),x=W/2+22+Math.sin(i+t/1900)*10;
+      at(b,x,y,i%5===0?140:60);
+    }
+  },
+  lanes(b,t,slow){
+    for(let row=0;row<3;row++){
+      const y=30+row*30,spd=(slow?16:10)+row*3;
+      band(b,10,W-10,y,12);
+      for(let i=0;i<7;i++)at(b,14+((t/spd)+i*16)%(W-28),y,i===6?170:90);
+    }
+  },
+  sweepY(b,t){
+    const y=((t/16)%(H-6));
+    for(let yy=0;yy<y;yy+=10)for(let x=6;x<W-6;x+=10)at(b,x,yy,18);
+    band(b,4,W-4,y,150);
+  },
+  sweepX(b,t,y){
+    const x=8+((t/14)%(W-16));
+    band(b,8,x,y,80);at(b,x,y,180);
+  },
+  square(b,t){
+    const s=6+Math.abs(Math.sin(t/1000))*34,cx=64,cy=58;
+    band(b,cx-s,cx+s,cy-s,90);band(b,cx-s,cx+s,cy+s,90);
+    vband(b,cx-s,cy-s,cy+s,90);vband(b,cx+s,cy-s,cy+s,90);
+  },
+  node(b,t){
+    const x=64+Math.sin(t/1300)*36,y=58+Math.cos(t/1600)*24;
+    band(b,x-10,x+10,y,40);vband(b,x,y-10,y+10,40);at(b,x,y,180);
+  },
+  contract(b,t){
+    const u=Math.min(1,(t%2200)/1300),r=48*(1-u*u)+4;
+    ring(b,64,58,r,130,2.5);if(u>.85)at(b,64,58,180);
+  },
+  expand(b,t){
+    const phase=t%3000,r=6+(Math.min(phase,2200)/2200)*48,f=phase<350?phase/350:phase>2500?(3000-phase)/500:1;
+    ring(b,64,58,r,140*f,2.4);
+  },
+  jitter(b,t){
+    const ox=Math.sin(t/80)*2.4;
+    for(let x=16;x<W-16;x+=7)vband(b,x+ox,18,H-18,x%14<7?40:12);
+  },
+  oscillate(b,t){
+    const x=W/2+Math.sin(t/420)*26;
+    vband(b,x,14,34,150);band(b,x-8,x+8,22,80);
+  },
+  sink(b,t){
+    for(let i=0;i<6;i++){
+      const y=12+((t/18)+i*20)%(H+12);
+      band(b,16,W-16,y,(70-i*6)*(1-y/H));
+    }
+  },
+  sparse(b,t){
+    for(let y=10;y<H-10;y+=14)for(let x=10;x<W-10;x+=14)
+      at(b,x,y,14+(Math.sin(t/700+x*.15+y*.2)*.5+.5)*40);
+  },
+  freezePrint(b,t,p){KINDS.print(b,12000,p);for(let i=0;i<W*H;i++)b[i]=b[i]*110/255},
+  full(b,t){
+    const y0=11;
+    for(let x=0;x<W;x++){
+      const edge=Math.max(0,16-Math.min(x,W-1-x)),y=y0-edge*edge/80;
+      for(let yy=y;yy<H;yy++)at(b,x,yy,22+(yy-y)*1.1);
+    }
+  },
+  freezeRed(b,t,p){KINDS.print(b,9000,p);for(let i=0;i<W*H;i++)b[i]=b[i]*.82},
+  empty(b){for(let i=0;i<W*H;i++)b[i]=5*cell(i%W,i/W|0)}
+};
+
+const CARDS=[
+  {title:"PREPARE",kind:"sparse",color:0x00ae42,icon:"prep",progress:0,group:"prep",note:"空场，稀疏点呼吸"},
+  {title:"UNKNOWN",kind:"sparse",color:0x00ae42,icon:"prep",progress:0,group:"prep",note:"未知编号同准备，不涨液面"},
+  {title:"BED HEATING",kind:"rise",arg:26,color:0xedaa48,icon:"heat",progress:0,group:"heat",note:"从底部升起的场"},
+  {title:"NOZZLE HEAT",kind:"rise",arg:15,color:0xedaa48,icon:"heat",progress:0,group:"heat",note:"同样上升，周期更快"},
+  {title:"TEMP CHECK",kind:"rise",arg:15,color:0xedaa48,icon:"heat",progress:0,group:"heat",note:"同喷嘴周期"},
+  {title:"CHAMBER HEAT",kind:"fog",color:0xedaa48,icon:"heat",progress:0,group:"heat",note:"低频雾场，无方向条"},
+  {title:"BED TEMP",kind:"rise",arg:26,color:0xedaa48,icon:"heat",progress:0,group:"heat",note:"同热床"},
+  {title:"BED LEVELING",kind:"plane",arg:58,color:0x419dce,icon:"level",progress:0,group:"level",note:"一条等值线缓慢倾斜扫过"},
+  {title:"LEVELING 1",kind:"plane",arg:32,color:0x419dce,icon:"level",progress:0,group:"level",note:"等值线偏上"},
+  {title:"LEVELING 2",kind:"plane",arg:86,color:0x419dce,icon:"level",progress:0,group:"level",note:"等值线偏下"},
+  {title:"HOT LEVELING",kind:"plane",arg:58,color:0x419dce,icon:"level",progress:0,group:"level",note:"同调平场"},
+  {title:"HOMING",kind:"contract",color:0x869ee0,icon:"home",progress:0,group:"cal",note:"等值环向内收"},
+  {title:"NOZZLE WIPE",kind:"oscillate",color:0x37bba4,icon:"clean",progress:0,group:"other",note:"上沿一条短带横振"},
+  {title:"LOADING",kind:"drift",arg:["y",1],color:0x37bba4,icon:"feed",progress:0,group:"feed",note:"点场下行"},
+  {title:"UNLOADING",kind:"drift",arg:["y",-1],color:0x37bba4,icon:"feed",progress:0,group:"feed",note:"点场上行"},
+  {title:"FILAMENT SWAP",kind:"oppose",color:0x37bba4,icon:"feed",progress:0,group:"feed",note:"两股反向流"},
+  {title:"FLOW CAL",kind:"lanes",arg:0,color:0x869ee0,icon:"feed",progress:0,group:"feed",note:"三行点列不同速率"},
+  {title:"FLOW RATIO",kind:"lanes",arg:1,color:0x869ee0,icon:"feed",progress:0,group:"feed",note:"同三行，更慢"},
+  {title:"BED SCANNING",kind:"sweepY",color:0x419dce,icon:"scan",progress:0,group:"scan",note:"水平带扫过，残格留下"},
+  {title:"SELF TEST",kind:"sweepY",color:0x419dce,icon:"scan",progress:0,group:"scan",note:"同扫场"},
+  {title:"FIRST LAYER",kind:"sweepX",arg:H-18,color:0x419dce,icon:"scan",progress:8,group:"scan",note:"贴底一条横扫"},
+  {title:"PLATE CHECK",kind:"square",color:0x419dce,icon:"scan",progress:0,group:"scan",note:"方等值线一张一合"},
+  {title:"CAMERA ALIGN",kind:"node",color:0x419dce,icon:"scan",progress:0,group:"scan",note:"格点上一个亮核在游走"},
+  {title:"LIDAR CAL",kind:"expand",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"等值环外扩"},
+  {title:"CALIBRATING",kind:"expand",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"同外扩"},
+  {title:"MOTION CAL",kind:"expand",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"同外扩"},
+  {title:"OFFSET CAL",kind:"expand",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"同外扩"},
+  {title:"VIBRATION CAL",kind:"jitter",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"竖纹场相位抖动"},
+  {title:"MOTOR CAL",kind:"jitter",color:0x869ee0,icon:"scan",progress:0,group:"cal",note:"同抖动"},
+  {title:"COOLING",kind:"sink",color:0x37bba4,icon:"cool",progress:0,group:"other",note:"亮带下沉并变稀"},
+  {title:"RUNNING",kind:"print",arg:64,color:0x00ae42,icon:"run",progress:64,group:"water",note:"液面 + 无源落点与圆波"},
+  {title:"RUNNING 28%",kind:"print",arg:28,color:0x00ae42,icon:"run",progress:28,group:"water",note:"低液面"},
+  {title:"RUNNING 92%",kind:"print",arg:92,color:0x00ae42,icon:"run",progress:92,group:"water",note:"高液面"},
+  {title:"PAUSE",kind:"freezePrint",arg:45,color:0xf2b942,icon:"pause",progress:45,group:"pause",note:"冻场，四边琥珀",marquee:"pause"},
+  {title:"WAITING",kind:"freezePrint",arg:45,color:0xf2b942,icon:"pause",progress:45,group:"pause",note:"暂停号共用冻场",marquee:"pause"},
+  {title:"FINISH",kind:"full",color:0x00ae42,icon:"done",progress:100,group:"special",note:"满场弯月，静止"},
+  {title:"FAILED",kind:"freezeRed",arg:45,color:0xef4248,icon:"warning",progress:45,group:"pause",note:"冻场，四边红",marquee:"error"},
+  {title:"IDLE",kind:"empty",color:0x949493,icon:"offline",progress:0,group:"special",note:"近空"},
+  {title:"OFFLINE",kind:"empty",color:0x949493,icon:"offline",progress:0,group:"special",note:"近空"}
+];
+
+const filters=[["all","全部"],["water","液面"],["heat","升/雾"],["level","等值面"],["feed","流"],["scan","扫"],["cal","扩/收/抖"],["other","振/沉"],["prep","疏点"],["pause","冻"],["special","满/空"]];
+let filter="all",motion=0;
+const nav=document.getElementById("filters"),grid=document.getElementById("grid");
+filters.forEach(([id,name],i)=>{const b=document.createElement("button");b.textContent=name;if(!i)b.className="active";
+  b.onclick=()=>{filter=id;[...nav.children].forEach(x=>x.classList.toggle("active",x===b));layout()};nav.append(b)});
+
+const nodes=[];
+function layout(){
+  grid.innerHTML="";nodes.length=0;
+  CARDS.forEach(c=>{
+    if(filter!=="all"&&c.group!==filter)return;
+    const el=document.createElement("article");el.className="card"+(c.marquee?" "+c.marquee:"");
+    const fill=document.createElement("canvas");fill.className="fill";fill.width=W;fill.height=H;
+    const icon=document.createElement("canvas");icon.className="icon";icon.width=28;icon.height=28;
+    const label=document.createElement("div");label.className="label";label.textContent=c.title;label.style.color="#"+c.color.toString(16).padStart(6,"0");
+    const pct=document.createElement("div");pct.className="percent";pct.textContent=String(c.progress);
+    const unit=document.createElement("div");unit.className="unit";unit.textContent="%";
+    const meta=document.createElement("div");meta.className="meta";meta.textContent=c.note;
+    if(c.marquee){const m=document.createElement("canvas");m.className="marquee";m.width=272;m.height=316;el.append(m);c._marquee=m}
+    el.append(fill,icon,label,pct,unit,meta);grid.append(el);
+    nodes.push({c,fill,icon,buf:new Uint8Array(W*H),img:fill.getContext("2d").createImageData(W,H)});
+  });
+}
+function drawIcon(canvas,c,t){
+  const ctx=canvas.getContext("2d"),pat=ICONS[c.icon],[r,g,b]=rgb(c.color);
+  ctx.clearRect(0,0,28,28);
+  const live=!c.marquee&&c.kind!=="empty"&&c.kind!=="full";
+  const a=live?0.6+0.4*(0.5+0.5*Math.sin(t/650)):1;
+  ctx.fillStyle=`rgba(${r},${g},${b},${a})`;
+  for(let y=0;y<9;y++)for(let x=0;x<9;x++)if(pat[y]&(1<<x))ctx.fillRect(x*3,y*3,2,2);
+}
+function blit(node){
+  const [cr,cg,cb]=rgb(node.c.color),d=node.img.data,buf=node.buf;
+  for(let i=0,p=0;i<W*H;i++,p+=4){
+    const a=buf[i];
+    d[p]=(0x12*(255-a)+cr*a)/255;d[p+1]=(0x13*(255-a)+cg*a)/255;d[p+2]=(0x15*(255-a)+cb*a)/255;d[p+3]=255;
+  }
+  node.fill.getContext("2d").putImageData(node.img,0,0);
+}
+function drawMarquee(canvas,color,t){
+  const ctx=canvas.getContext("2d"),[r,g,b]=rgb(color);
+  ctx.clearRect(0,0,272,316);
+  const peri=272*2+316*2-8,head=(t/6)%peri;
+  const xy=s=>{s=((s%peri)+peri)%peri;if(s<272)return[s,1];s-=272;if(s<316)return[270,s];s-=316;if(s<272)return[272-s,314];return[1,316-(s-272)]}
+  for(let k=0;k<2;k++)for(let i=0;i<64;i++){
+    const [x,y]=xy(head+k*peri/2-i);ctx.fillStyle=`rgba(${r},${g},${b},${(1-i/64)*(1-i/64)*.85})`;ctx.fillRect(x,y,3,3);
+  }
+}
+function call(kind,buf,t,arg){
+  const fn=KINDS[kind];if(!fn)return;
+  if(kind==="drift")fn(buf,t,arg[0],arg[1]);
+  else fn(buf,t,arg);
+}
+function paint(t){
+  for(const node of nodes){
+    node.buf.fill(0);
+    const frozen=node.c.kind==="freezePrint"||node.c.kind==="freezeRed"?9000:t;
+    call(node.c.kind,node.buf,frozen,node.c.arg??node.c.progress);
+    blit(node);drawIcon(node.icon,node.c,t);
+    if(node.c._marquee)drawMarquee(node.c._marquee,node.c.marquee==="error"?0xef4248:0xf2b942,t);
+  }
+}
+layout();
+let last=performance.now();
+(function loop(now){motion+=Math.min(80,now-last);last=now;paint(motion);requestAnimationFrame(loop)})(last);
+</script>
+</html>

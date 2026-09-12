@@ -1,0 +1,19 @@
+[Unit]
+Description=P4 printer video relay
+After=network.target
+
+[Service]
+WorkingDirectory=%h/p4-video-relay
+ExecStart=%h/p4-video-relay/venv/bin/python -u %h/p4-video-relay/server.py
+Restart=on-failure
+RestartSec=2
+LimitCORE=0
+MemoryMax=1G
+Environment=PYTHONUNBUFFERED=1
+Environment=VIDEO_RELAY_BIND=0.0.0.0
+Environment=VIDEO_RELAY_PORT=2344
+Environment=VIDEO_RELAY_ALLOW=127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+Environment=VIDEO_RELAY_IDLE=2
+
+[Install]
+WantedBy=default.target

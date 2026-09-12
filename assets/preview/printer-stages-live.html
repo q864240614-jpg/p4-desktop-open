@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P4 · 当前 STAGE 特效</title>
+<style>
+:root{color-scheme:dark;--bg:#030303;--surface:#121315;--muted:#949493;--white:#f5f5f2;--bambu:#00ae42}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font:14px/1.45 ui-sans-serif,system-ui}
+header{padding:28px 32px 8px;position:sticky;top:0;background:linear-gradient(#030303 78%,transparent);z-index:2}
+.brand{letter-spacing:.16em;color:var(--bambu);font-size:12px}h1{font-weight:550;font-size:28px;margin:8px 0 6px}
+p{color:var(--muted);margin:0 0 12px;max-width:920px}
+code{color:#c5d4c8}
+nav{display:flex;flex-wrap:wrap;gap:8px;padding:0 32px 16px}
+nav button{border:0;border-radius:10px;padding:8px 12px;background:#17221a;color:#c5d4c8;cursor:pointer;font:inherit}
+nav button.active{background:#00ae42;color:#031109}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:22px;padding:8px 32px 48px}
+.card{width:272px;height:316px;margin:0 auto;background:var(--surface);border-radius:16px;position:relative;overflow:hidden;box-shadow:0 0 0 1px #1b221d}
+.card canvas.fill{position:absolute;left:8px;top:68px;width:256px;height:240px;image-rendering:pixelated}
+.card canvas.edges{position:absolute;inset:0;width:272px;height:316px;pointer-events:none}
+.icon{position:absolute;left:20px;top:22px}
+.label{position:absolute;left:54px;top:20px;width:198px;font:700 13px/28px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.percent{position:absolute;left:38px;top:86px;font:700 72px/1 "Segoe UI",ui-sans-serif,system-ui;color:#f5f5f2;pointer-events:none;text-shadow:0 0 18px #000c}
+.unit{position:absolute;left:220px;top:118px;color:var(--muted);font:600 22px ui-sans-serif}
+.meta{position:absolute;left:16px;bottom:14px;color:#6d7a72;font:12px ui-monospace,Menlo,Consolas,monospace}
+.tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:#1a2420;color:#8aa;font-size:10px}
+</style>
+<header>
+  <div class="brand">P4 DESK · CURRENT FIRMWARE</div>
+  <h1>状态窗口当前特效</h1>
+  <p>按现有 <code>portable_ui_stage_motion.inc</code> / <code>portable_ui_water.inc</code> 整数算法重放。过程态只在 y=154–210 的 56px 条带里做一次 7.6s 姿态（建立 / 执行 / 消散）。暂停与失败走四边跑马灯。未改固件。</p>
+</header>
+<nav id="filters"></nav>
+<main id="grid"></main>
+<script>
+const FX={STILL:0,WATER:1,HEAT:2,LEVEL:3,FEED:4,SCAN:5,CLEAN:6,HOME:7,FLOW:8,CALIBRATE:9,COOL:10,TOOL:11,CENTER:12,CAMERA:13,LIDAR:14,MOTOR:15,MOTION:16,OFFSET:17,VIBRATION:18,PREP:19,PAUSE:20,ERROR:21,FINISH:22};
+const NAMES=Object.fromEntries(Object.entries(FX).map(([k,v])=>[v,k]));
+const COLOR_BAMBU=0x00ae42,COLOR_MUTED=0x949493,COLOR_SURFACE=0x121315;
+const STAGE_TOP=154,STAGE_BOTTOM=210,STAGE_PERIOD=7600;
+const ICONS={
+  run:[0x010,0x038,0x07C,0x0FE,0x1FF,0x0FE,0x07C,0x038,0x010],
+  pause:[0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6],
+  warning:[0x010,0x038,0x028,0x06C,0x054,0x0C6,0x082,0x110,0x1FF],
+  done:[0,0x100,0x180,0x0C1,0x063,0x036,0x01C,0x008,0],
+  offline:[0x101,0x082,0x044,0x028,0x010,0x028,0x044,0x082,0x101],
+  heat:[0x044,0x088,0x044,0x022,0x044,0,0x101,0x101,0x1FF],
+  level:[0x010,0x038,0x07C,0x010,0,0x101,0x111,0x101,0x1FF],
+  feed:[0x07C,0x082,0x092,0x082,0x07C,0x010,0x054,0x038,0x010],
+  scan:[0x1C7,0x101,0x101,0,0x1FF,0,0x101,0x101,0x1C7]
+};
+function max(a,b){return a>b?a:b}function min(a,b){return a<b?a:b}
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+function u32(n){return n>>>0}function imul(a,b){return Math.imul(a,b)>>>0}
+function sine(elapsed,period){
+  const e=u32(elapsed)%u32(period),phase=e*360,angle=Math.trunc(phase/period),frac=phase%period;
+  const s=x=>Math.round(Math.sin((x%360)*Math.PI/180)*32767);
+  return Math.trunc((s(angle)*(period-frac)+s(angle+1)*frac)/period);
+}
+function printerEffect(s){
+  if(!s.online)return FX.STILL;
+  if(s.error)return FX.ERROR;
+  if(s.state==="FAILED")return FX.STILL;
+  if(s.state==="PAUSE")return FX.PAUSE;
+  if(s.state==="FINISH")return FX.FINISH;
+  if(s.state==="IDLE")return FX.STILL;
+  switch(s.stage){
+    case 1:case 40:case 47:case 48:return FX.LEVEL;
+    case 2:case 7:case 15:case 49:case 50:case 54:return FX.HEAT;
+    case 4:case 22:case 24:return FX.FEED;
+    case 9:case 10:case 11:case 41:case 42:case 44:case 45:case 52:case 55:return FX.SCAN;
+    case 14:return FX.CLEAN;case 13:return FX.HOME;case 8:return FX.FLOW;
+    case 3:return FX.VIBRATION;case 12:case 18:return FX.LIDAR;
+    case 25:case 31:return FX.MOTOR;case 36:case 37:case 38:return FX.MOTION;
+    case 39:case 56:return FX.OFFSET;case 46:case 53:case 60:return FX.CAMERA;
+    case 62:return FX.TOOL;case 70:return FX.CENTER;
+    case 19:case 43:case 51:return FX.CALIBRATE;case 29:return FX.COOL;
+    case 5:case 6:case 16:case 17:case 20:case 21:case 23:case 26:case 27:case 28:case 30:case 32:case 33:case 34:case 35:return FX.PAUSE;
+    case 0:case -1:case 255:return s.state==="RUNNING"&&s.progress>0?FX.WATER:FX.PREP;
+    default:return FX.WATER;
+  }
+}
+function printerStatus(s){
+  if(!s.online)return s.has_data?"DISCONNECTED":"OFFLINE";
+  if(s.error)return "FAILED";
+  if(s.state==="FAILED")return "STOPPED";
+  if(s.state==="PAUSE"||s.state==="FINISH"||s.state==="IDLE")return s.state;
+  const map={1:"BED LEVELING",40:"HOT LEVELING",47:"LEVELING 1",48:"LEVELING 2",2:"BED HEATING",7:"NOZZLE HEAT",15:"TEMP CHECK",49:"CHAMBER HEAT",50:"BED TEMP",54:"BED TEMP",4:"FILAMENT SWAP",22:"UNLOADING",24:"LOADING",3:"VIBRATION CAL",8:"FLOW CAL",19:"FLOW RATIO",9:"BED SCANNING",10:"FIRST LAYER",11:"PLATE CHECK",12:"LIDAR CAL",18:"LIDAR CAL",13:"HOMING",14:"NOZZLE WIPE",25:"MOTOR CAL",31:"MOTOR CAL",29:"COOLING",36:"MOTION CAL",37:"MOTION CAL",38:"MOTION CAL",39:"OFFSET CAL",56:"OFFSET CAL",41:"SELF TEST",42:"SELF TEST",44:"SELF TEST",52:"SELF TEST",55:"SELF TEST",43:"LASER CAL",46:"CAMERA CAL",53:"CAMERA CAL",60:"CAMERA CAL",62:"HOTEND TEST",70:"CENTERING",45:"CAMERA ALIGN",51:"CAL LINE"};
+  if(s.stage in map)return map[s.stage];
+  if(s.stage===0||s.stage===-1||s.stage===255)return s.state||"CONNECTED";
+  return printerEffect(s)===FX.PAUSE?"WAITING":"RUNNING";
+}
+function printerColor(s){
+  switch(printerEffect(s)){
+    case FX.STILL:return COLOR_MUTED;case FX.ERROR:return 0xEF4248;case FX.PAUSE:return 0xF2B942;
+    case FX.HEAT:return 0xEDAA48;case FX.LEVEL:case FX.SCAN:return 0x419DCE;
+    case FX.FEED:case FX.COOL:return 0x37BBA4;
+    case FX.TOOL:case FX.CENTER:case FX.CAMERA:case FX.LIDAR:case FX.MOTOR:case FX.MOTION:case FX.OFFSET:case FX.VIBRATION:
+    case FX.CALIBRATE:case FX.HOME:case FX.FLOW:return 0x869EE0;
+    default:return COLOR_BAMBU;
+  }
+}
+function printerRunning(s){const e=printerEffect(s);return e>=FX.WATER&&e<=FX.PREP}
+function iconPattern(s){
+  const e=printerEffect(s);
+  if(!s.online)return ICONS.offline;
+  if(e===FX.ERROR)return ICONS.warning;if(e===FX.PAUSE)return ICONS.pause;if(e===FX.FINISH)return ICONS.done;
+  if(e===FX.HEAT)return ICONS.heat;if(e===FX.LEVEL||e===FX.HOME)return ICONS.level;
+  if(e===FX.FEED||e===FX.FLOW)return ICONS.feed;if(e===FX.SCAN||e===FX.CALIBRATE)return ICONS.scan;
+  return ICONS.run;
+}
+function hexRgb(c){return [(c>>16)&255,(c>>8)&255,c&255]}
+function readability(y){
+  let alpha=255;const bands=[[14,112,90],[128,154,55],[174,212,110]];
+  for(const b of bands){let d=max(0,max(b[0]-y,y-b[1])),w=max(0,20-d);w=Math.trunc(w*w*(60-2*w)/400);alpha=min(alpha,255-Math.trunc((255-b[2])*w/20))}
+  return alpha;
+}
+function waterCluster(time,lane){
+  const period=lane?4871:3203;let shifted=u32(time+(lane?1739:0)),seed=Math.trunc(shifted/period)+1+lane*701;
+  seed=u32(seed);seed^=seed>>>16;seed=imul(seed,0x7feb352d);seed^=seed>>>15;seed=imul(seed,0x846ca68b);seed^=seed>>>16;
+  return {x:32+seed%192,age:(shifted%period)-((seed>>>8)%850),fall:520+((seed>>>17)%240),count:3+((seed>>>12)%4),spread:18+((seed>>>22)%17)};
+}
+function stageEase(elapsed,duration){
+  const q=Math.trunc(clamp(elapsed,0,duration)*256/duration);
+  return Math.trunc(q*q*(768-2*q)/65536);
+}
+function stagePose(stage,effect,time){
+  const p={marks:[],gain:0,haze:0,core_scale:0,halo_scale:0};
+  const age=time%STAGE_PERIOD;
+  const q=stageEase(age-600,4600),remain=256-q;
+  p.gain=Math.trunc(stageEase(age,600)*(256-stageEase(age-6300,1300))/256);
+  p.haze=stageEase(age-5900,1700)*3;
+  p.core_scale=Math.trunc(768*256/(768+p.haze));
+  p.halo_scale=Math.trunc(128*65536/(1280+p.haze));
+  const cx=128*256,cy=28*256,move=44*256+168*q;
+  const mark=(x,y,rx,ry,alpha,ring)=>p.marks.push({x,y,rx,ry,alpha,ring});
+  const bar=(x,y,w,h,a)=>mark(x,y,w,h,a,0);
+  switch(effect){
+    case FX.CLEAN:{
+      bar(cx,38*256,86*256,100,38);
+      const scrub=Math.trunc(sine(max(0,age-600),1400)*remain/32767);
+      const head=cx+scrub*58;
+      bar(head,27*256,8*256,2*256,200);
+      bar(head,38*256,13*256,160,110);
+      break;
+    }
+    case FX.FEED:{
+      if(stage===4){
+        bar(84*256,18*256,40*256,100,30);
+        bar(84*256,38*256,40*256,100,30);
+        bar(170*256,28*256,42*256,100,30);
+        const swap=stageEase(age-600,2100),load=stageEase(age-2900,2100);
+        bar(128*256-84*swap,18*256,6*256,230,Math.trunc(180*(256-load)/256));
+        bar(44*256+168*load,(38*256-10*load),7*256,230,190);
+      }else{
+        bar(cx,cy,84*256,100,35);
+        const head=stage===22?256*256-move:move;
+        bar(head,cy,9*256,256,200);
+        bar(head+(stage===22?1:-1)*12*256,cy,5*256,100,70);
+        mark((stage===22?44:212)*256,cy,3*256,3*256,90,1);
+      }
+      break;
+    }
+    case FX.VIBRATION:{
+      for(let i=0;i<19;i++){
+        const amplitude=Math.trunc(sine(max(0,age-600)+i*95,1100)*remain/32767);
+        bar((38+i*10)*256,cy+amplitude*7,3*256,180,150);
+      }
+      break;
+    }
+    case FX.MOTOR:{
+      mark(cx,cy,20*256,20*256,40,1);
+      for(let i=0;i<3;i++){
+        const phase=q*24+i*1200;
+        mark(cx+Math.trunc(sine(phase+900,3600)*20*256/32767),
+          cy+Math.trunc(sine(phase,3600)*20*256/32767),2*256,2*256,180,0);
+      }
+      mark(cx,cy,256,256,70,0);
+      break;
+    }
+    case FX.LEVEL:{
+      bar(cx,cy,86*256,100,30);
+      for(let i=0;i<3;i++){
+        const offset=(i===1?-12:i===0?9:6)*remain;
+        bar((64+i*64)*256,cy+offset,22*256,180,160);
+        mark((64+i*64)*256,44*256,256,256,Math.trunc(q/3),0);
+      }
+      break;
+    }
+    case FX.OFFSET:case FX.CENTER:case FX.HOME:{
+      bar(cx,cy,12*256,80,35);bar(cx,cy,80,12*256,35);
+      const dx=remain*(effect===FX.CENTER?72:54),dy=remain*(effect===FX.CENTER?-17:13);
+      if(effect===FX.HOME){
+        mark(cx-dx,cy-dy,2*256,2*256,170,0);
+        mark(cx+dx,cy+dy,2*256,2*256,170,0);
+      }else if(effect===FX.OFFSET){
+        for(const sign of [-1,1]){
+          bar(cx+sign*dx,cy+sign*dy,8*256,140,150);
+          bar(cx+sign*dx,cy+sign*dy,140,8*256,150);
+        }
+      }else mark(cx-dx,cy-dy,2*256,2*256,195,0);
+      mark(cx,cy,(4+Math.trunc(remain/32))*256,(4+Math.trunc(remain/32))*256,Math.trunc(q/2),1);
+      break;
+    }
+    case FX.CAMERA:{
+      const rx=24*256+remain*50,ry=13*256+remain*7;
+      for(const side of [-1,1])for(const end of [-1,1]){
+        bar(cx+side*(rx-4*256),cy+end*ry,4*256,120,160);
+        bar(cx+side*rx,cy+end*(ry-3*256),120,3*256,160);
+      }
+      mark(cx,cy,256,256,75+Math.trunc(q/4),0);
+      break;
+    }
+    case FX.LIDAR:{
+      const r=10*256+remain*10;
+      mark(cx,cy,r,r,170,1);
+      bar(cx,cy,7*256,80,45);bar(cx,cy,80,7*256,45);
+      bar(48*256+60*q,cy,3*256,140,100);
+      bar(208*256-60*q,cy,3*256,140,100);
+      break;
+    }
+    case FX.SCAN:{
+      for(let i=0;i<5;i++){
+        const x=(48+i*40)*256;
+        const confirmed=stageEase(move-x+4*256,16*256);
+        mark(x,cy+(i%2?7:-7)*256,256,256,25+Math.trunc(confirmed*100/256),0);
+      }
+      bar(move,cy,100,19*256,185);
+      bar(move-5*256,cy,2*256,18*256,45);
+      break;
+    }
+    case FX.MOTION:{
+      const path=q*4,leg=min(3,Math.trunc(path/256)),part=stageEase(path-leg*256,256);
+      bar(cx,12*256,52*256,70,25);bar(cx,44*256,52*256,70,25);
+      bar(76*256,cy,70,16*256,25);bar(180*256,cy,70,16*256,25);
+      const startx=[76,180,180,76],starty=[12,12,44,44],endx=[180,180,76,76],endy=[12,44,44,12];
+      for(let i=0;i<4;i++)mark(startx[i]*256,starty[i]*256,256,256,45,0);
+      mark(startx[leg]*256+(endx[leg]-startx[leg])*part,
+        starty[leg]*256+(endy[leg]-starty[leg])*part,2*256,2*256,190,0);
+      break;
+    }
+    case FX.TOOL:{
+      for(let i=0;i<2;i++){
+        bar((48+i*160)*256,cy,100,12*256,55);
+        bar((54+i*148)*256,40*256,6*256,100,55);
+      }
+      const exchange=stageEase(age-1500,3200);
+      bar(48*256+160*exchange,cy,6*256,7*256,170);
+      break;
+    }
+    case FX.FLOW:{
+      for(let row=0;row<3;row++){
+        const progress=stageEase(age-600-row*500,3300);
+        const end=44*256+168*progress;
+        bar(Math.trunc((44*256+end)/2),(14+row*14)*256,Math.trunc((end-44*256)/2),100,65);
+        mark(end,(14+row*14)*256,2*256,256,175,0);
+      }
+      break;
+    }
+    case FX.HEAT:case FX.COOL:{
+      const bars=stage===7||stage===15?1:stage===49?3:5;
+      for(let i=0;i<bars;i++){
+        let phase=stageEase(age-600-i*170,3800);
+        if(effect===FX.COOL)phase=256-phase;
+        const top=43*256-30*phase,x=cx+(2*i-bars+1)*17*256;
+        bar(x,28*256,100,16*256,28);
+        bar(x,Math.trunc((43*256+top)/2),220,Math.trunc((43*256-top)/2),100);
+        bar(x,top,3*256,160,180);
+      }
+      break;
+    }
+    case FX.CALIBRATE:{
+      if(stage===19){
+        const lengths=[58*256+q*72,164*256-q*34];
+        for(let i=0;i<2;i++){
+          const end=48*256+lengths[i];
+          bar(Math.trunc((48*256+end)/2),(18+i*20)*256,Math.trunc(lengths[i]/2),140,95);
+          bar(end,(18+i*20)*256,200,3*256,185);
+        }
+        break;
+      }
+      const radius=6*256+q*15;
+      mark(cx,cy,radius,radius,155,1);
+      mark(cx,cy,256,256,60,0);
+      break;
+    }
+    case FX.PREP:
+      for(let i=0;i<3;i++)mark((108+i*20)*256,cy,256,256,70+Math.trunc(q/4),0);
+      break;
+    default:break;
+  }
+  return p;
+}
+function stageLight(p,x,y){
+  if(y<STAGE_TOP||y>STAGE_BOTTOM)return 0;
+  let strongest=0;const px=x*256,py=(y-STAGE_TOP)*256;
+  for(const m of p.marks){
+    const dx=Math.abs(px-m.x),dy=Math.abs(py-m.y);
+    let distance;
+    if(m.ring){
+      const norm=max(dx,dy)+Math.trunc(min(dx,dy)*3/8);
+      distance=Math.abs(norm-m.rx)-100;
+    }else distance=max(dx-m.rx,dy-m.ry);
+    if(distance>=1280+p.haze)continue;
+    const core=Math.trunc(clamp(256-distance,0,256)*p.core_scale/256);
+    const radius=1280+p.haze;
+    const halo=Math.trunc(clamp(radius-distance,0,radius)*p.halo_scale/65536);
+    const energy=Math.trunc(m.alpha*max(core,halo)/256);
+    if(energy>strongest)strongest=energy;
+  }
+  const lattice=(x%4<2&&y%4<2)?256:64;
+  const edge=min(256,min(y-STAGE_TOP,STAGE_BOTTOM-y)*128);
+  return Math.trunc(Math.trunc(Math.trunc(min(255,Math.trunc(strongest*5/4))*lattice/256)*p.gain/256)*edge/256);
+}
+function waterGlow(pixels,cx,cy,rx,ry,strength){
+  const y0=max(0,(cy>>8)-ry),y1=min(239,(cy>>8)+ry+1),x0=max(0,(cx>>8)-rx),x1=min(255,(cx>>8)+rx+1);
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    const coverage=max(0,256-Math.trunc(Math.abs(x*256-cx)/rx)-Math.trunc(Math.abs(y*256-cy)/ry));
+    const gx=(x+(Math.trunc(y/5)%2)*2)%5,gy=y%5,led=gx<2&&gy<2?255:gx<3&&gy<3?90:24;
+    const add=Math.trunc(coverage*strength/256*led/255*readability(y)/255);
+    const i=y*256+x;pixels[i]=min(255,pixels[i]+add);
+  }
+}
+function renderWater(pixels,s,motionMs){
+  pixels.fill(0);
+  const effect=printerEffect(s),running=effect===FX.WATER,finished=effect===FX.FINISH;
+  const process=effect>=FX.HEAT&&effect<=FX.PREP;
+  const level=finished?100:max(0,s.progress),center=232-Math.trunc(level*228/100);
+  const clusters=[waterCluster(motionMs,0),waterCluster(motionMs,1)];
+  const surface=new Int32Array(256);
+  for(let x=0;x<256;x++){
+    let q=center*256;
+    if(running||effect===FX.PAUSE){
+      q+=Math.trunc((sine(motionMs+x*11,3400)*6*256+sine(motionMs+x*23,5700)*2*256)/32767);
+      for(let lane=0;lane<2;lane++){
+        const c=clusters[lane],impact=c.age-c.fall;
+        if(impact>=0&&impact<1200){
+          const d=Math.abs(x-c.x)-Math.trunc(impact*(70+c.spread)/1200);
+          const decay=Math.trunc((1200-impact)*(1200-impact)/1200);
+          q-=Math.trunc((max(0,12-Math.abs(d))-max(0,8-Math.abs(d-17)))*decay*4*256/(12*1200));
+        }
+      }
+    }
+    if(finished){const edge=max(0,24-min(x,255-x));q=(12-Math.trunc(edge*edge/96))*256}
+    surface[x]=q;
+  }
+  const pose=stagePose(s.stage,effect,motionMs);
+  const y0=process?STAGE_TOP:0,y1=process?STAGE_BOTTOM:239;
+  for(let y=y0;y<=y1;y++){
+    const rd=readability(y);
+    for(let x=0;x<256;x++){
+      let alpha=0,depth=y*256-surface[x];
+      if(level>0&&depth>=0){
+        const d=max(0,y-center);
+        alpha=12+min(15,Math.trunc(d/10))+max(0,28-d)*2;
+        const gx=(x+(Math.trunc(y/5)%2)*2)%5,gy=y%5;
+        if(gx<2&&gy<2)alpha+=5+(x*13+y*7)%13;
+        if(finished)alpha+=max(0,14-Math.trunc(Math.abs(x-128)/9))+max(0,14-min(x,255-x));
+      }
+      if(level>0)alpha+=Math.trunc(max(0,640-Math.abs(depth))*110/640);
+      const stageAlpha=process?stageLight(pose,x,y):0;
+      if(effect===FX.STILL)alpha=Math.trunc(alpha/3);
+      if(effect===FX.PAUSE)alpha=Math.trunc(alpha*110/255);
+      alpha=Math.trunc(alpha*rd/255);
+      if(process)alpha=0;
+      alpha=max(alpha,stageAlpha);
+      const edge=min(min(x,255-x),min(y,239-y));
+      alpha=Math.trunc(alpha*min(8,edge)/8);
+      pixels[y*256+x]=clamp(alpha,0,255);
+    }
+  }
+  if(running)for(let lane=0;lane<2;lane++){
+    const c=clusters[lane],age=c.age,impact=age-c.fall,at=center*256;
+    if(age>=0&&age<c.fall){
+      const cy=Math.trunc(age*age*at/(c.fall*c.fall)),fade=min(255,Math.trunc(age*255/180));
+      for(let dot=0;dot<3;dot++){
+        const drift=Math.trunc(sine(motionMs+lane*1100+dot*330,4100)*3*256/32767);
+        waterGlow(pixels,c.x*256+drift,cy-dot*5*256,6,6,Math.trunc((210-dot*55)*fade/255));
+      }
+    }else if(impact>=0&&impact<720){
+      for(let dot=0;dot<c.count;dot++){
+        const duration=480+dot*39;if(impact>=duration)continue;
+        const direction=2*dot-(c.count-1);
+        const cx=c.x*256+Math.trunc(direction*impact*c.spread*256/(duration*(c.count-1||1)));
+        const height=18+(dot*7+lane*11)%19;
+        const cy=at-Math.trunc(impact*(duration-impact)*height*4*256/(duration*duration));
+        const energy=Math.trunc((duration-impact)*(duration-impact)*190/(duration*duration));
+        waterGlow(pixels,cx,cy,6,5,energy);
+      }
+    }
+  }
+}
+function drawEdges(ctx,w,h,color,started,now){
+  ctx.clearRect(0,0,w,h);
+  const age=(now-started)%5200,peri=2*(w+h);
+  const t=clamp(age-900,0,3400),q=Math.trunc(t*65536/3400);
+  const eased=Math.trunc(Math.trunc(q*q/65536)*(3*65536-2*q)/65536);
+  const head=Math.trunc(eased*peri/65536)%peri;
+  let energy;
+  if(age<900)energy=90+Math.trunc((32767-sine(age+450,1800))*165/65534);
+  else if(age<4300)energy=255;
+  else energy=90+Math.trunc((32767+sine(age-4300+450,1800))*165/65534);
+  const [r,g,b]=hexRgb(color);
+  const sides=[{side:0,length:w,start:0},{side:1,length:h,start:w},{side:2,length:w,start:w+h},{side:3,length:h,start:2*w+h}];
+  for(const s of sides){
+    for(let pos=0;pos<s.length;pos+=4){
+      const path=s.start+pos;
+      let behind=(head-path+peri)%peri;
+      behind=min(behind,(behind+Math.trunc(peri/2))%peri);
+      const tail=max(0,360-behind),nose=max(0,60-(Math.trunc(peri/2)-behind))*6,light=max(tail,nose);
+      const alpha=Math.trunc((35+Math.trunc(light*light*220/(360*360)))*energy/255);
+      const x=s.side===0?pos:s.side===1?0:s.side===2?w-pos-3:0;
+      const y=s.side===0?0:s.side===1?pos:s.side===2?0:h-pos-3;
+      const gw=s.side%2?7:4,gh=s.side%2?4:7;
+      ctx.fillStyle=`rgba(${r},${g},${b},${alpha/4/255})`;
+      ctx.fillRect(x,y,gw,gh);
+      const cx=x+(s.side===1?5:0),cy=y+(s.side===2?5:0);
+      const cw=s.side%2?(s.side===1?2:2):4,ch=s.side%2?4:(s.side===2?2:2);
+      ctx.fillStyle=`rgba(${r},${g},${b},${alpha/255})`;
+      ctx.fillRect(cx,cy,cw,ch);
+    }
+  }
+}
+
+const WAITING=[5,6,16,17,20,21,23,26,27,28,30,32,33,34,35];
+const NAMED=[
+  [0,"PREPARE",0,"prep"],[0,"RUNNING",64,"water"],
+  [1,"RUNNING",8,"level"],[2,"RUNNING",8,"heat"],[3,"RUNNING",8,"cal"],[4,"RUNNING",12,"feed"],
+  [7,"RUNNING",8,"heat"],[8,"RUNNING",10,"feed"],[9,"RUNNING",8,"scan"],[10,"RUNNING",6,"scan"],
+  [11,"RUNNING",6,"scan"],[12,"RUNNING",8,"cal"],[13,"RUNNING",4,"cal"],[14,"RUNNING",10,"clean"],
+  [15,"RUNNING",8,"heat"],[18,"RUNNING",8,"cal"],[19,"RUNNING",8,"cal"],[22,"RUNNING",20,"feed"],
+  [24,"RUNNING",20,"feed"],[25,"RUNNING",8,"cal"],[29,"RUNNING",40,"heat"],[31,"RUNNING",8,"cal"],
+  [36,"RUNNING",8,"cal"],[39,"RUNNING",8,"cal"],[40,"RUNNING",8,"level"],[41,"RUNNING",8,"scan"],
+  [43,"RUNNING",8,"cal"],[45,"RUNNING",8,"scan"],[46,"RUNNING",8,"cal"],[47,"RUNNING",8,"level"],
+  [48,"RUNNING",8,"level"],[49,"RUNNING",8,"heat"],[50,"RUNNING",8,"heat"],[51,"RUNNING",8,"cal"],
+  [52,"RUNNING",8,"scan"],[53,"RUNNING",8,"cal"],[54,"RUNNING",8,"heat"],[55,"RUNNING",8,"scan"],
+  [56,"RUNNING",8,"cal"],[60,"RUNNING",8,"cal"],[62,"RUNNING",8,"cal"],[70,"RUNNING",8,"cal"],
+  [57,"RUNNING",55,"water"]
+].map(([stage,state,progress,group])=>({stage,state,progress,group,online:true,has_data:true,error:0}));
+const SPECIAL=[
+  {stage:-1,state:"IDLE",progress:0,online:true,has_data:true,error:0,group:"special"},
+  {stage:0,state:"PAUSE",progress:45,online:true,has_data:true,error:0,group:"pause"},
+  {stage:0,state:"FINISH",progress:100,online:true,has_data:true,error:0,group:"special"},
+  {stage:0,state:"RUNNING",progress:45,online:true,has_data:true,error:1,group:"pause"},
+  {stage:0,state:"FAILED",progress:45,online:true,has_data:true,error:0,group:"special"},
+  {stage:-1,state:"IDLE",progress:0,online:false,has_data:false,error:0,group:"special"},
+  {stage:0,state:"RUNNING",progress:40,online:false,has_data:true,error:0,group:"special"}
+];
+const CARDS=[...SPECIAL,...NAMED,...WAITING.map(stage=>({stage,state:"RUNNING",progress:45,online:true,has_data:true,error:0,group:"pause"}))];
+const filters=[["all","全部"],["special","总状态"],["water","水面"],["heat","加热/降温"],["level","调平"],["feed","走料/流量"],["scan","扫描"],["clean","擦嘴"],["cal","校准族"],["pause","暂停/等待"],["prep","准备"]];
+let filter="all",motion=0,edgeStarted=0;
+const nav=document.getElementById("filters"),grid=document.getElementById("grid"),nodes=[];
+filters.forEach(([id,label],i)=>{const b=document.createElement("button");b.textContent=label;if(!i)b.className="active";
+  b.onclick=()=>{filter=id;[...nav.children].forEach(x=>x.classList.toggle("active",x===b));layout()};nav.append(b)});
+
+function drawIcon(canvas,s,t){
+  const ctx=canvas.getContext("2d"),pat=iconPattern(s),[r,g,b]=hexRgb(printerColor(s));
+  ctx.clearRect(0,0,28,28);
+  const breath=printerRunning(s)?(222+(sine(t,4200)+32767)*30/65534)/255:1;
+  ctx.fillStyle=`rgba(${r},${g},${b},${breath})`;
+  for(let y=0;y<9;y++)for(let x=0;x<9;x++)if(pat[y]&(1<<x))ctx.fillRect(x*3,y*3,2,2);
+}
+function blit(node){
+  const [cr,cg,cb]=hexRgb(node.color),d=node.image.data,[sr,sg,sb]=hexRgb(COLOR_SURFACE);
+  for(let i=0,p=0;i<256*240;i++,p+=4){
+    const a=node.alpha[i];
+    d[p]=Math.trunc((sr*(255-a)+cr*a)/255);
+    d[p+1]=Math.trunc((sg*(255-a)+cg*a)/255);
+    d[p+2]=Math.trunc((sb*(255-a)+cb*a)/255);d[p+3]=255;
+  }
+  node.fill.getContext("2d").putImageData(node.image,0,0);
+}
+function layout(){
+  grid.innerHTML="";nodes.length=0;
+  CARDS.forEach(s=>{
+    if(filter!=="all"&&s.group!==filter)return;
+    const effect=printerEffect(s),color=printerColor(s);
+    const el=document.createElement("article");el.className="card";
+    const fill=document.createElement("canvas");fill.className="fill";fill.width=256;fill.height=240;
+    const icon=document.createElement("canvas");icon.className="icon";icon.width=28;icon.height=28;
+    const label=document.createElement("div");label.className="label";label.textContent=printerStatus(s);label.style.color="#"+color.toString(16).padStart(6,"0");
+    const pct=document.createElement("div");pct.className="percent";pct.textContent=String(s.progress);
+    const unit=document.createElement("div");unit.className="unit";unit.textContent="%";
+    const meta=document.createElement("div");meta.className="meta";
+    meta.innerHTML=`stg ${s.stage} · ${s.state}<span class="tag">${NAMES[effect]}</span>`;
+    el.append(fill,icon,label,pct,unit,meta);
+    let edges=null;
+    if(effect===FX.PAUSE||effect===FX.ERROR){
+      edges=document.createElement("canvas");edges.className="edges";edges.width=272;edges.height=316;
+      el.append(edges);
+    }
+    grid.append(el);
+    const node={s,fill,icon,edges,color,alpha:new Uint8Array(256*240),image:fill.getContext("2d").createImageData(256,240)};
+    nodes.push(node);renderWater(node.alpha,node.s,motion|0);blit(node);drawIcon(node.icon,node.s,motion);
+  });
+}
+layout();
+let last=performance.now(),waterTick=0,edgeTick=0;
+function frame(now){
+  const elapsed=Math.min(100,now-last);last=now;motion+=elapsed;
+  const water=now-waterTick>=32;if(water)waterTick=now;
+  const edge=now-edgeTick>=16;if(edge){if(!edgeStarted)edgeStarted=now;edgeTick=now}
+  for(const node of nodes){
+    drawIcon(node.icon,node.s,motion);
+    if(water&&printerRunning(node.s)){renderWater(node.alpha,node.s,motion|0);blit(node)}
+    if(edge&&node.edges)drawEdges(node.edges.getContext("2d"),272,316,node.color,edgeStarted,now);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</html>

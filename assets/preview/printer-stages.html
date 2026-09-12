@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P4 · 打印机 STAGE 全绘制</title>
+<style>
+:root{color-scheme:dark;--bg:#030303;--surface:#121315;--muted:#949493;--white:#f5f5f2;--bambu:#00ae42}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font:14px/1.45 ui-sans-serif,system-ui}
+header{padding:28px 32px 12px;position:sticky;top:0;background:linear-gradient(#030303 70%,transparent);z-index:2}
+.brand{letter-spacing:.16em;color:var(--bambu);font-size:12px}h1{font-weight:550;font-size:28px;margin:8px 0 6px}
+p{color:var(--muted);margin:0 0 14px;max-width:820px}
+nav{display:flex;flex-wrap:wrap;gap:8px;padding:0 32px 18px}
+nav button{border:0;border-radius:10px;padding:8px 12px;background:#17221a;color:#c5d4c8;cursor:pointer;font:inherit}
+nav button.active{background:#00ae42;color:#031109}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:22px;padding:8px 32px 48px}
+.card{width:272px;height:316px;margin:0 auto;background:var(--surface);border-radius:16px;position:relative;overflow:hidden;box-shadow:0 0 0 1px #1b221d}
+.card canvas.fill{position:absolute;left:8px;top:68px;width:256px;height:240px;image-rendering:pixelated}
+.icon{position:absolute;left:20px;top:22px}
+.label{position:absolute;left:54px;top:20px;width:198px;font:700 13px/28px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.percent{position:absolute;left:38px;top:86px;font:700 72px/1 "Segoe UI",ui-sans-serif,system-ui;color:#f5f5f2;pointer-events:none;text-shadow:0 0 18px #000c}
+.unit{position:absolute;left:220px;top:118px;color:var(--muted);font:600 22px ui-sans-serif}
+.meta{position:absolute;left:16px;bottom:14px;color:#6d7a72;font:12px ui-monospace,Menlo,Consolas,monospace}
+.tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:#1a2420;color:#8aa;font-size:10px;letter-spacing:.04em}
+</style>
+<header>
+  <div class="brand">P4 DESK · FIRMWARE PORT</div>
+  <h1>状态窗口 STAGE 全绘制</h1>
+  <p>按 <code>portable_ui_water.inc</code> / <code>portable_ui_stages.inc</code> 的整数算法在浏览器重放。256×240 alpha 卡 + 重着色。暂停族动画相同，各号仍单独占一张卡。</p>
+</header>
+<nav id="filters"></nav>
+<main id="grid"></main>
+<script>
+const FX={STILL:0,WATER:1,HEAT:2,LEVEL:3,FEED:4,SCAN:5,CLEAN:6,HOME:7,FLOW:8,CALIBRATE:9,COOL:10,PREP:11,PAUSE:12,ERROR:13,FINISH:14};
+const COLOR_BAMBU=0x00ae42,COLOR_MUTED=0x949493;
+const ICONS={
+  run:[0x010,0x038,0x07C,0x0FE,0x1FF,0x0FE,0x07C,0x038,0x010],
+  pause:[0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6,0x0C6],
+  warning:[0x010,0x038,0x028,0x06C,0x054,0x0C6,0x082,0x110,0x1FF],
+  done:[0,0x100,0x180,0x0C1,0x063,0x036,0x01C,0x008,0],
+  offline:[0x101,0x082,0x044,0x028,0x010,0x028,0x044,0x082,0x101],
+  heat:[0x044,0x088,0x044,0x022,0x044,0,0x101,0x101,0x1FF],
+  level:[0x010,0x038,0x07C,0x010,0,0x101,0x111,0x101,0x1FF],
+  feed:[0x07C,0x082,0x092,0x082,0x07C,0x010,0x054,0x038,0x010],
+  scan:[0x1C7,0x101,0x101,0,0x1FF,0,0x101,0x101,0x1C7]
+};
+function max(a,b){return a>b?a:b}function min(a,b){return a<b?a:b}function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+function u32(n){return n>>>0}function imul(a,b){return Math.imul(a,b)>>>0}
+function sine(elapsed,period){
+  const e=u32(elapsed)%u32(period),phase=e*360,angle=Math.trunc(phase/period),frac=phase%period;
+  const s=x=>Math.round(Math.sin((x%360)*Math.PI/180)*32767);
+  return Math.trunc((s(angle)*(period-frac)+s(angle+1)*frac)/period);
+}
+function printerEffect(s){
+  if(!s.online)return FX.STILL;
+  if(s.error||s.state==="FAILED")return FX.ERROR;
+  if(s.state==="PAUSE")return FX.PAUSE;
+  if(s.state==="FINISH")return FX.FINISH;
+  if(s.state==="IDLE")return FX.STILL;
+  switch(s.stage){
+    case 1:case 40:case 47:case 48:return FX.LEVEL;
+    case 2:case 7:case 15:case 49:case 50:case 54:return FX.HEAT;
+    case 4:case 22:case 24:return FX.FEED;
+    case 9:case 10:case 11:case 41:case 42:case 44:case 45:case 52:case 55:return FX.SCAN;
+    case 14:return FX.CLEAN;case 13:return FX.HOME;case 8:return FX.FLOW;
+    case 3:case 12:case 18:case 19:case 25:case 31:case 36:case 37:case 38:case 39:case 43:case 46:case 51:case 53:case 56:return FX.CALIBRATE;
+    case 29:return FX.COOL;
+    case 5:case 6:case 16:case 17:case 20:case 21:case 23:case 26:case 27:case 28:case 30:case 32:case 33:case 34:case 35:return FX.PAUSE;
+    case 0:case -1:case 255:return s.state==="RUNNING"&&s.progress>0?FX.WATER:FX.PREP;
+    default:return FX.WATER;
+  }
+}
+function printerStatus(s){
+  if(!s.online)return s.has_data?"DISCONNECTED":"OFFLINE";
+  if(s.error||s.state==="FAILED")return "FAILED";
+  if(s.state==="PAUSE"||s.state==="FINISH"||s.state==="IDLE")return s.state;
+  const map={1:"BED LEVELING",40:"HOT LEVELING",47:"LEVELING 1",48:"LEVELING 2",2:"BED HEATING",7:"NOZZLE HEAT",15:"TEMP CHECK",49:"CHAMBER HEAT",50:"BED TEMP",54:"BED TEMP",4:"FILAMENT SWAP",22:"UNLOADING",24:"LOADING",3:"VIBRATION CAL",8:"FLOW CAL",19:"FLOW RATIO",9:"BED SCANNING",10:"FIRST LAYER",11:"PLATE CHECK",12:"LIDAR CAL",18:"LIDAR CAL",13:"HOMING",14:"NOZZLE WIPE",25:"MOTOR CAL",31:"MOTOR CAL",29:"COOLING",36:"MOTION CAL",37:"MOTION CAL",38:"MOTION CAL",39:"OFFSET CAL",41:"SELF TEST",42:"SELF TEST",44:"SELF TEST",52:"SELF TEST",55:"SELF TEST",43:"CALIBRATING",46:"CALIBRATING",53:"CALIBRATING",56:"CALIBRATING",45:"CAMERA ALIGN",51:"CAL LINE"};
+  if(s.stage in map)return map[s.stage];
+  if(s.stage===0||s.stage===-1||s.stage===255)return s.state||"CONNECTED";
+  return printerEffect(s)===FX.PAUSE?"WAITING":"RUNNING";
+}
+function printerColor(s){
+  switch(printerEffect(s)){
+    case FX.STILL:return COLOR_MUTED;case FX.ERROR:return 0xEF4248;case FX.PAUSE:return 0xF2B942;
+    case FX.HEAT:return 0xEDAA48;case FX.LEVEL:case FX.SCAN:return 0x419DCE;
+    case FX.FEED:case FX.COOL:return 0x37BBA4;case FX.CALIBRATE:case FX.HOME:case FX.FLOW:return 0x869EE0;
+    default:return COLOR_BAMBU;
+  }
+}
+function printerRunning(s){const e=printerEffect(s);return e>=FX.WATER&&e<=FX.PREP}
+function iconPattern(s){
+  const e=printerEffect(s);
+  if(!s.online)return ICONS.offline;
+  if(e===FX.ERROR)return ICONS.warning;if(e===FX.PAUSE)return ICONS.pause;if(e===FX.FINISH)return ICONS.done;
+  if(e===FX.HEAT)return ICONS.heat;if(e===FX.LEVEL||e===FX.HOME)return ICONS.level;
+  if(e===FX.FEED||e===FX.FLOW)return ICONS.feed;if(e===FX.SCAN||e===FX.CALIBRATE)return ICONS.scan;
+  return ICONS.run;
+}
+function hexRgb(c){return [(c>>16)&255,(c>>8)&255,c&255]}
+function readability(y){
+  let alpha=255;const bands=[[14,112,90],[128,154,55],[174,212,110]];
+  for(const b of bands){let d=max(0,max(b[0]-y,y-b[1])),w=max(0,20-d);w=Math.trunc(w*w*(60-2*w)/400);alpha=min(alpha,255-Math.trunc((255-b[2])*w/20))}
+  return alpha;
+}
+function waterCluster(time,lane){
+  const period=lane?4871:3203;let shifted=u32(time+(lane?1739:0)),seed=Math.trunc(shifted/period)+1+lane*701;
+  seed=u32(seed);seed^=seed>>>16;seed=imul(seed,0x7feb352d);seed^=seed>>>15;seed=imul(seed,0x846ca68b);seed^=seed>>>16;
+  return {x:32+seed%192,age:(shifted%period)-((seed>>>8)%850),fall:520+((seed>>>17)%240),count:3+((seed>>>12)%4),spread:18+((seed>>>22)%17)};
+}
+function stagePose(stage,effect,time){
+  const phase=time%4200,q=min(phase,3200)*256/3200|0,ease=256-Math.trunc((256-q)*(256-q)/256);
+  const fade=phase<500?Math.trunc(phase*255/500):phase<2900?255:Math.trunc((4200-phase)*255/1300);
+  return {stage,t:time%120000,scan:35+Math.trunc((sine(time,3800)+32767)*158/65534),
+    sweep:24+Math.trunc((sine(time,2600)+32767)*208/65534),radius:16+Math.trunc(ease*120/256),
+    blur:7+Math.trunc(max(0,phase-2500)*16/1700),gain:fade,effect};
+}
+function stageLight(p,x,y){
+  let a=0,t=p.t,stage=p.stage,effect=p.effect;
+  const grid=(x+(Math.trunc(y/5)%2)*2)%5<2&&y%5<2?255:48;
+  switch(effect){
+    case FX.HOME:case FX.CALIBRATE:{
+      let distance=Math.abs(x-128)+Math.abs(y-118);
+      if(stage===3||stage===25||stage===31)distance=Math.abs(y-118)+Math.trunc(Math.abs(x-128)/3);
+      else if(stage===12||stage===18)distance=max(Math.abs(x-128),Math.abs(y-118));
+      else if(stage===39)distance=min(Math.abs(x-128-Math.trunc(p.sweep/8)),Math.abs(y-118+Math.trunc(p.sweep/8)));
+      else if(stage===51)distance=Math.abs(y-60-Math.trunc(x/40)*20);
+      a=Math.trunc(max(0,p.blur-Math.abs(distance-p.radius))*90/p.blur*p.gain/255);break;
+    }
+    case FX.FLOW:
+      for(let row=0;row<3;row++){const head=((Math.trunc(t/(9+row*3))+row*61)%280)-12,behind=head-x;
+        if(behind>=0&&behind<95)a+=Math.trunc(max(0,7-Math.abs(y-(82+row*34)))*(95-behind)/7)}break;
+    case FX.HEAT:{
+      const lift=(y+Math.trunc(t/(stage===7?15:24)))%72,spread=stage===49?80:stage===7||stage===15?36:56;
+      a=Math.trunc(max(0,26-Math.abs(lift-36))*max(0,Math.trunc(spread/2)-Math.abs((x+12)%spread-Math.trunc(spread/2)))/18);break;
+    }
+    case FX.FEED:{
+      const direction=stage===22?-1:1,head=(direction*(Math.trunc(t/10)%128)+x+256)%128;
+      a=Math.trunc(max(0,20-Math.abs(head-64))*max(0,18-Math.abs(y-126))/10);
+      if(stage===4)a+=Math.trunc(max(0,20-Math.abs((256-x+Math.trunc(t/13))%128-64))*max(0,12-Math.abs(y-92))/10);break;
+    }
+    case FX.LEVEL:{
+      const tilt=Math.trunc(sine(t,4200)*(x-128)/32767/8),height=stage===48?150:stage===47?82:116;
+      a=max(0,7-Math.abs(y-height-tilt))*13;if(x%40<3&&Math.abs(y-height)<48)a+=18;break;
+    }
+    case FX.SCAN:{
+      let distance=stage===45?Math.abs(x-p.sweep):Math.abs(y-p.scan);
+      if(stage===11)distance=Math.abs(max(Math.abs(x-128),Math.abs(y-118))-Math.trunc(p.scan/2));
+      if(stage===10)distance=Math.abs(y-170)+Math.trunc(Math.abs(x-p.sweep)/4);
+      a=max(0,12-distance)*7;if(x%24<2&&y%24<2)a+=20;break;
+    }
+    case FX.CLEAN:a=Math.trunc(max(0,16-Math.abs(x-p.sweep))*max(0,20-Math.abs(y-152))/8);break;
+    case FX.COOL:a=max(0,12-Math.abs((x+Math.trunc(y/2)+Math.trunc(t/24))%52-26))*2;break;
+    case FX.PREP:if(x%13<2&&y%13<2)a=10+Math.trunc((sine(t+x*7+y*11,5200)+32767)*24/65534);break;
+  }
+  return Math.trunc(a*grid/255);
+}
+function waterGlow(pixels,cx,cy,rx,ry,strength){
+  const y0=max(0,(cy>>8)-ry),y1=min(239,(cy>>8)+ry+1),x0=max(0,(cx>>8)-rx),x1=min(255,(cx>>8)+rx+1);
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    const coverage=max(0,256-Math.trunc(Math.abs(x*256-cx)/rx)-Math.trunc(Math.abs(y*256-cy)/ry));
+    const gx=(x+(Math.trunc(y/5)%2)*2)%5,gy=y%5,led=gx<2&&gy<2?255:gx<3&&gy<3?90:24;
+    const add=Math.trunc(coverage*strength/256*led/255*readability(y)/255);
+    const i=y*256+x;pixels[i]=min(255,pixels[i]+add);
+  }
+}
+function renderWater(pixels,s,motionMs){
+  const effect=printerEffect(s),running=effect===FX.WATER,finished=effect===FX.FINISH;
+  const process=effect>=FX.HEAT&&effect<=FX.PREP;
+  const level=finished?100:max(0,s.progress),center=232-Math.trunc(level*228/100);
+  const clusters=[waterCluster(motionMs,0),waterCluster(motionMs,1)];
+  const surface=new Int32Array(256);
+  for(let x=0;x<256;x++){
+    let q=center*256;
+    if(running||effect===FX.PAUSE){
+      q+=Math.trunc((sine(motionMs+x*11,3400)*6*256+sine(motionMs+x*23,5700)*2*256)/32767);
+      for(let lane=0;lane<2;lane++){
+        const c=clusters[lane],impact=c.age-c.fall;
+        if(impact>=0&&impact<1200){
+          const d=Math.abs(x-c.x)-Math.trunc(impact*(70+c.spread)/1200);
+          const decay=Math.trunc((1200-impact)*(1200-impact)/1200);
+          q-=Math.trunc((max(0,12-Math.abs(d))-max(0,8-Math.abs(d-17)))*decay*4*256/(12*1200));
+        }
+      }
+    }
+    if(finished){const edge=max(0,24-min(x,255-x));q=(12-Math.trunc(edge*edge/96))*256}
+    surface[x]=q;
+  }
+  const pose=stagePose(s.stage,effect,motionMs);
+  for(let y=0;y<240;y++){
+    const rd=readability(y);
+    for(let x=0;x<256;x++){
+      let alpha=0,depth=y*256-surface[x];
+      if(level>0&&depth>=0){
+        const d=max(0,y-center);
+        alpha=12+min(15,Math.trunc(d/10))+max(0,28-d)*2;
+        const gx=(x+(Math.trunc(y/5)%2)*2)%5,gy=y%5;
+        if(gx<2&&gy<2)alpha+=5+(x*13+y*7)%13;
+        if(finished)alpha+=max(0,14-Math.trunc(Math.abs(x-128)/9))+max(0,14-min(x,255-x));
+      }
+      if(level>0)alpha+=Math.trunc(max(0,640-Math.abs(depth))*110/640);
+      if(process)alpha+=stageLight(pose,x,y);
+      if(effect===FX.STILL)alpha=Math.trunc(alpha/3);
+      if(effect===FX.PAUSE)alpha=Math.trunc(alpha*110/255);
+      alpha=Math.trunc(alpha*rd/255);
+      const edge=min(min(x,255-x),min(y,239-y));
+      alpha=Math.trunc(alpha*min(8,edge)/8);
+      pixels[y*256+x]=clamp(alpha,0,255);
+    }
+  }
+  if(running)for(let lane=0;lane<2;lane++){
+    const c=clusters[lane],age=c.age,impact=age-c.fall,at=center*256;
+    if(age>=0&&age<c.fall){
+      const cy=Math.trunc(age*age*at/(c.fall*c.fall)),fade=min(255,Math.trunc(age*255/180));
+      for(let dot=0;dot<3;dot++){
+        const drift=Math.trunc(sine(motionMs+lane*1100+dot*330,4100)*3*256/32767);
+        waterGlow(pixels,c.x*256+drift,cy-dot*5*256,6,6,Math.trunc((210-dot*55)*fade/255));
+      }
+    }else if(impact>=0&&impact<720){
+      for(let dot=0;dot<c.count;dot++){
+        const duration=480+dot*39;if(impact>=duration)continue;
+        const direction=2*dot-(c.count-1);
+        const cx=c.x*256+Math.trunc(direction*impact*c.spread*256/(duration*(c.count-1)));
+        const height=18+(dot*7+lane*11)%19;
+        const cy=at-Math.trunc(impact*(duration-impact)*height*4*256/(duration*duration));
+        const energy=Math.trunc((duration-impact)*(duration-impact)*190/(duration*duration));
+        waterGlow(pixels,cx,cy,6,5,energy);
+      }
+    }
+  }
+}
+
+const WAITING=[5,6,16,17,20,21,23,26,27,28,30,32,33,34,35];
+const NAMED=[
+  {stage:0,state:"PREPARE",progress:0,group:"prep"},
+  {stage:0,state:"RUNNING",progress:64,group:"water"},
+  {stage:1,state:"RUNNING",progress:8,group:"level"},
+  {stage:2,state:"RUNNING",progress:8,group:"heat"},
+  {stage:3,state:"RUNNING",progress:8,group:"cal"},
+  {stage:4,state:"RUNNING",progress:12,group:"feed"},
+  {stage:7,state:"RUNNING",progress:8,group:"heat"},
+  {stage:8,state:"RUNNING",progress:10,group:"feed"},
+  {stage:9,state:"RUNNING",progress:8,group:"scan"},
+  {stage:10,state:"RUNNING",progress:6,group:"scan"},
+  {stage:11,state:"RUNNING",progress:6,group:"scan"},
+  {stage:12,state:"RUNNING",progress:8,group:"cal"},
+  {stage:13,state:"RUNNING",progress:4,group:"cal"},
+  {stage:14,state:"RUNNING",progress:10,group:"other"},
+  {stage:15,state:"RUNNING",progress:8,group:"heat"},
+  {stage:18,state:"RUNNING",progress:8,group:"cal"},
+  {stage:19,state:"RUNNING",progress:8,group:"cal"},
+  {stage:22,state:"RUNNING",progress:20,group:"feed"},
+  {stage:24,state:"RUNNING",progress:20,group:"feed"},
+  {stage:25,state:"RUNNING",progress:8,group:"cal"},
+  {stage:29,state:"RUNNING",progress:40,group:"other"},
+  {stage:31,state:"RUNNING",progress:8,group:"cal"},
+  {stage:36,state:"RUNNING",progress:8,group:"cal"},
+  {stage:39,state:"RUNNING",progress:8,group:"cal"},
+  {stage:40,state:"RUNNING",progress:8,group:"level"},
+  {stage:41,state:"RUNNING",progress:8,group:"scan"},
+  {stage:43,state:"RUNNING",progress:8,group:"cal"},
+  {stage:45,state:"RUNNING",progress:8,group:"scan"},
+  {stage:47,state:"RUNNING",progress:8,group:"level"},
+  {stage:48,state:"RUNNING",progress:8,group:"level"},
+  {stage:49,state:"RUNNING",progress:8,group:"heat"},
+  {stage:50,state:"RUNNING",progress:8,group:"heat"},
+  {stage:51,state:"RUNNING",progress:8,group:"cal"},
+  {stage:52,state:"RUNNING",progress:8,group:"scan"},
+  {stage:54,state:"RUNNING",progress:8,group:"heat"},
+  {stage:55,state:"RUNNING",progress:8,group:"scan"},
+  {stage:56,state:"RUNNING",progress:8,group:"cal"},
+  {stage:57,state:"RUNNING",progress:55,group:"water"}
+];
+const SPECIAL=[
+  {stage:-1,state:"IDLE",progress:0,online:true,group:"special"},
+  {stage:0,state:"PAUSE",progress:45,online:true,group:"pause"},
+  {stage:0,state:"FINISH",progress:100,online:true,group:"special"},
+  {stage:0,state:"FAILED",progress:45,online:true,error:1,group:"pause"},
+  {stage:-1,state:"IDLE",progress:0,online:false,has_data:false,group:"special"},
+  {stage:0,state:"RUNNING",progress:40,online:false,has_data:true,group:"special"}
+];
+const CARDS=[
+  ...SPECIAL,
+  ...NAMED,
+  ...WAITING.map(stage=>({stage,state:"RUNNING",progress:45,online:true,group:"pause"}))
+].map(c=>({online:true,has_data:true,error:0,...c}));
+
+const filters=[["all","全部"],["special","总状态"],["water","水面"],["heat","加热"],["level","调平"],["feed","换料/流量"],["scan","扫描"],["cal","校准/归位"],["pause","暂停/失败"],["prep","准备"],["other","擦嘴/降温"]];
+let filter="all";
+const nav=document.getElementById("filters"),grid=document.getElementById("grid");
+filters.forEach(([id,label],i)=>{const b=document.createElement("button");b.textContent=label;if(!i)b.className="active";b.onclick=()=>{filter=id;[...nav.children].forEach(x=>x.classList.toggle("active",x===b));layout()};nav.append(b)});
+
+const nodes=[];
+function layout(){
+  grid.innerHTML="";nodes.length=0;
+  CARDS.forEach((s,index)=>{
+    if(filter!=="all"&&s.group!==filter)return;
+    const effect=printerEffect(s),color=printerColor(s),title=printerStatus(s);
+    const el=document.createElement("article");el.className="card";
+    const fill=document.createElement("canvas");fill.className="fill";fill.width=256;fill.height=240;
+    const icon=document.createElement("canvas");icon.className="icon";icon.width=28;icon.height=28;
+    const label=document.createElement("div");label.className="label";label.textContent=title;label.style.color="#"+color.toString(16).padStart(6,"0");
+    const pct=document.createElement("div");pct.className="percent";pct.textContent=s.progress<0?"--":String(s.progress);
+    const unit=document.createElement("div");unit.className="unit";unit.textContent="%";
+    const meta=document.createElement("div");meta.className="meta";
+    meta.innerHTML=`stg ${s.stage} · ${s.state}<span class="tag">FX ${Object.keys(FX).find(k=>FX[k]===effect)}</span>`;
+    el.append(fill,icon,label,pct,unit,meta);grid.append(el);
+    const node={s,fill,icon,color,effect,alpha:new Uint8Array(256*240),image:fill.getContext("2d").createImageData(256,240)};
+    nodes.push(node);renderWater(node.alpha,node.s,motion|0);blit(node);drawIcon(node.icon,node.s,motion);
+  });
+}
+
+function drawIcon(canvas,s,motion){
+  const ctx=canvas.getContext("2d"),pat=iconPattern(s),[r,g,b]=hexRgb(printerColor(s));
+  ctx.clearRect(0,0,28,28);
+  const breath=printerRunning(s)?(222+(sine(motion,4200)+32767)*30/65534)/255:1;
+  ctx.fillStyle=`rgba(${r},${g},${b},${breath})`;
+  for(let y=0;y<9;y++)for(let x=0;x<9;x++)if(pat[y]&(1<<x))ctx.fillRect(x*3,y*3,2,2);
+}
+function blit(node){
+  const {alpha,image,color}=node,[cr,cg,cb]=hexRgb(color),d=image.data;
+  for(let i=0,p=0;i<256*240;i++,p+=4){
+    const a=alpha[i];
+    d[p]=Math.trunc((0x12*(255-a)+cr*a)/255);
+    d[p+1]=Math.trunc((0x13*(255-a)+cg*a)/255);
+    d[p+2]=Math.trunc((0x15*(255-a)+cb*a)/255);
+    d[p+3]=255;
+  }
+  node.fill.getContext("2d").putImageData(image,0,0);
+}
+
+let motion=0,last=performance.now(),waterTick=0;
+function frame(now){
+  const elapsed=Math.min(100,now-last);last=now;motion+=elapsed;
+  const water=now-waterTick>=32;if(water)waterTick=now;
+  for(const node of nodes){
+    drawIcon(node.icon,node.s,motion);
+    if(water&&printerRunning(node.s)){renderWater(node.alpha,node.s,motion|0);blit(node)}
+  }
+  requestAnimationFrame(frame);
+}
+layout();
+requestAnimationFrame(frame);
+</script>
+</html>

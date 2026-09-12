@@ -1,0 +1,9 @@
+dependencies:
+  idf: ">=5.4,<6.0"
+  lvgl/lvgl:
+    version: "8.3.11"
+  espressif/esp_lvgl_port: "2.6.0"
+  espressif/esp32_p4_function_ev_board:
+    path: "../vendor/espressif__esp32_p4_function_ev_board"
+  espressif/esp_wifi_remote: "~1.0.0"
+  espressif/esp_hosted: "~2.0.0"

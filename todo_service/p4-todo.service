@@ -1,0 +1,12 @@
+[Unit]
+Description=P4 desktop Todo service
+After=network.target
+
+[Service]
+WorkingDirectory=%h/p4-todo
+EnvironmentFile=%h/p4-todo/deploy.env
+ExecStart=/usr/bin/python3 %h/p4-todo/server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

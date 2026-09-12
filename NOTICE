@@ -1,0 +1,19 @@
+First-party firmware, host services, tools, and documentation in this
+snapshot are MIT-licensed (see LICENSE).
+
+This tree also redistributes third-party work under their own terms.
+Do not treat LICENSE as covering the following:
+
+- LVGL 8.3.11 — MIT, fetched by the ESP-IDF component manager into
+  managed_components/lvgl__lvgl (https://github.com/lvgl/lvgl).
+- Espressif ESP-IDF 5.4.x, BSP, LCD, Wi-Fi remote, and ESP-Hosted
+  components — Apache License 2.0. Bundled BSP/LCD copies live under
+  vendor/ (see each component LICENSE / license.txt).
+- Cisco OpenH264 decoder sources under components/openh264/upstream —
+  BSD-2-Clause (components/openh264/upstream/LICENSE). A copy of the
+  Cisco notice that ships with firmware images is firmware/OpenH264-LICENSE.txt.
+- Inter font — SIL Open Font License 1.1 (assets/fonts/OFL.txt and
+  components/portable_ui/INTER_OFL.txt).
+- Noto Sans CJK — SIL Open Font License 1.1 (assets/fonts/NotoSansCJK-OFL.txt).
+
+ESP-IDF itself is not shipped here. Install ESP-IDF 5.4.x separately.

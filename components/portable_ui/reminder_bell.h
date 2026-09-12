@@ -1,0 +1,9 @@
+#pragma once
+#include <stdint.h>
+
+/* Native 15 x 15 LED asset; editable reference: assets/reminder-bell.svg. */
+static const uint16_t reminder_bell[15] = {
+    0x0000, 0x0080, 0x03E0, 0x0410, 0x0410,
+    0x0410, 0x0410, 0x0410, 0x0808, 0x1004,
+    0x1FFC, 0x0000, 0x01C0, 0x0000, 0x0000,
+};

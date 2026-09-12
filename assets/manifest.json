@@ -1,0 +1,58 @@
+[
+  {
+    "id": "bulb",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "fan",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "previous",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "play",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "pause",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "next",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  },
+  {
+    "id": "speaker",
+    "width": 64,
+    "height": 64,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": true
+  },
+  {
+    "id": "status_cluster",
+    "width": 36,
+    "height": 36,
+    "format": "LV_IMG_CF_ALPHA_8BIT",
+    "accent": false
+  }
+]

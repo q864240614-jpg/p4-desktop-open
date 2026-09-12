@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+  <title>Todo reminder / native LED bell</title>
+  <g fill="#F5F5F2">
+    <circle cx="75" cy="15" r="3"/>
+    <circle cx="55" cy="25" r="3"/>
+    <circle cx="65" cy="25" r="3"/>
+    <circle cx="75" cy="25" r="3"/>
+    <circle cx="85" cy="25" r="3"/>
+    <circle cx="95" cy="25" r="3"/>
+    <circle cx="45" cy="35" r="3"/>
+    <circle cx="105" cy="35" r="3"/>
+    <circle cx="45" cy="45" r="3"/>
+    <circle cx="105" cy="45" r="3"/>
+    <circle cx="45" cy="55" r="3"/>
+    <circle cx="105" cy="55" r="3"/>
+    <circle cx="45" cy="65" r="3"/>
+    <circle cx="105" cy="65" r="3"/>
+    <circle cx="45" cy="75" r="3"/>
+    <circle cx="105" cy="75" r="3"/>
+    <circle cx="35" cy="85" r="3"/>
+    <circle cx="115" cy="85" r="3"/>
+    <circle cx="25" cy="95" r="3"/>
+    <circle cx="125" cy="95" r="3"/>
+    <circle cx="25" cy="105" r="3"/>
+    <circle cx="35" cy="105" r="3"/>
+    <circle cx="45" cy="105" r="3"/>
+    <circle cx="55" cy="105" r="3"/>
+    <circle cx="65" cy="105" r="3"/>
+    <circle cx="75" cy="105" r="3"/>
+    <circle cx="85" cy="105" r="3"/>
+    <circle cx="95" cy="105" r="3"/>
+    <circle cx="105" cy="105" r="3"/>
+    <circle cx="115" cy="105" r="3"/>
+    <circle cx="125" cy="105" r="3"/>
+    <circle cx="65" cy="125" r="3"/>
+    <circle cx="75" cy="125" r="3"/>
+    <circle cx="85" cy="125" r="3"/>
+  </g>
+</svg>
